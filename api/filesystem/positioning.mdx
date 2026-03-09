@@ -1,0 +1,358 @@
+---
+title: 'Stream Positioning'
+description: 'Functions for navigating binary streams with type-safe offsets'
+---
+
+## Overview
+
+Stream positioning functions provide type-safe navigation of binary streams using strongly-typed offsets and explicit origin references.
+
+---
+
+## setposfs
+
+Sets the read position of a stream.
+
+```cpp
+void setposfs(
+    std::istream& file,
+    const offset_t offset,
+    const origin dir = origin::begin
+);
+```
+
+### Parameters
+
+<ParamField path="file" type="std::istream&" required>
+  Stream to reposition.
+</ParamField>
+
+<ParamField path="offset" type="offset_t" required>
+  Position offset to seek to.
+</ParamField>
+
+<ParamField path="dir" type="origin" default="origin::begin">
+  Reference point for the offset:
+  - `origin::begin` - Offset from start of stream
+  - `origin::current` - Offset from current position
+  - `origin::end` - Offset from end of stream
+</ParamField>
+
+### Behavior
+
+Internally converts:
+- `offset_t` → `std::streamoff`
+- `origin` → `std::ios_base::seekdir`
+
+Then calls `file.seekg()` with the converted values.
+
+### Example
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Seek to offset 128 from beginning
+stx::setposfs(file, stx::offset_t{128});
+
+// Move 32 bytes forward from current position
+stx::setposfs(file, stx::offset_t{32}, stx::origin::current);
+
+// Seek to 64 bytes before end of file
+stx::setposfs(file, stx::offset_t{-64}, stx::origin::end);
+```
+
+---
+
+## skipfs
+
+Skips forward in the stream relative to the current position.
+
+```cpp
+template<binary_readable Type = std::byte>
+void skipfs(
+    std::istream& file,
+    const offset_t offset
+);
+```
+
+### Parameters
+
+<ParamField path="file" type="std::istream&" required>
+  Stream to advance.
+</ParamField>
+
+<ParamField path="offset" type="offset_t" required>
+  Number of bytes to skip forward.
+</ParamField>
+
+### Template Parameters
+
+<ParamField path="Type" type="binary_readable" default="std::byte">
+  Type parameter for template instantiation. Does not affect behavior.
+</ParamField>
+
+### Behavior
+
+Equivalent to:
+```cpp
+setposfs(file, offset, origin::current);
+```
+
+Or in standard library terms:
+```cpp
+file.seekg(offset, std::ios::cur);
+```
+
+### Example
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read header
+auto header = stx::readfs<FileHeader>(file);
+
+// Skip padding section
+stx::skipfs(file, stx::offset_t{32});
+
+// Read next data
+auto data = stx::readfs<DataBlock>(file);
+```
+
+<Tip>
+  Use `skipfs()` instead of `setposfs(..., origin::current)` for clearer intent when advancing through a file.
+</Tip>
+
+---
+
+## origin Enum
+
+Defines reference points for stream positioning operations.
+
+```cpp
+enum class origin : u8 {
+    begin,
+    current,
+    end
+};
+```
+
+### Values
+
+<ParamField path="origin::begin" type="u8 = 0">
+  Offset is relative to the beginning of the stream.
+</ParamField>
+
+<ParamField path="origin::current" type="u8 = 1">
+  Offset is relative to the current stream position.
+</ParamField>
+
+<ParamField path="origin::end" type="u8 = 2">
+  Offset is relative to the end of the stream.
+</ParamField>
+
+### Purpose
+
+Provides a type-safe alternative to `std::ios_base::seekdir`. The `origin` enum:
+- Uses clear, semantic names
+- Prevents mixing with other integer values
+- Integrates with STX's strongly-typed design
+
+### Conversion
+
+The `origin` enum values map to `std::ios_base::seekdir`:
+
+| STX Origin | Standard Library | Value |
+|------------|------------------|-------|
+| `origin::begin` | `std::ios::beg` | 0 |
+| `origin::current` | `std::ios::cur` | 1 |
+| `origin::end` | `std::ios::end` | 2 |
+
+### Example
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// All equivalent ways to seek to offset 100
+stx::setposfs(file, stx::offset_t{100});
+stx::setposfs(file, stx::offset_t{100}, stx::origin::begin);
+
+// Seek relative to current position
+stx::setposfs(file, stx::offset_t{50}, stx::origin::current);
+
+// Seek relative to end (negative offset)
+stx::setposfs(file, stx::offset_t{-64}, stx::origin::end);
+```
+
+---
+
+## offset_t Type
+
+A strongly-typed wrapper around `usize` for file offsets.
+
+```cpp
+using offset_t = details::strong_type<usize, details::offset_tag>;
+```
+
+### Construction
+
+```cpp
+// Direct construction
+stx::offset_t offset{128};
+
+// From integral types
+stx::offset_t offset{static_cast<std::size_t>(value)};
+```
+
+### Operations
+
+```cpp
+stx::offset_t a{100};
+stx::offset_t b{50};
+
+// Addition with raw value
+auto c = a + 25;  // offset_t{125}
+
+// Subtraction with raw value  
+auto d = a - 25;  // offset_t{75}
+
+// Difference between offsets
+auto diff = a - b;  // usize{50}
+
+// Comparison
+if (a > b) { /* ... */ }
+```
+
+### Purpose
+
+`offset_t` prevents accidental mixing of different kinds of numeric values:
+
+```cpp
+// ❌ Won't compile - type safety prevents errors
+void process(stx::offset_t file_pos, int record_id) {
+    // setposfs(file, record_id);  // Error: record_id is not offset_t
+    setposfs(file, file_pos);      // ✅ Correct
+}
+```
+
+### Extracting the Value
+
+```cpp
+stx::offset_t offset{128};
+
+// Get underlying value
+stx::usize raw = offset.get();
+
+// Explicit cast
+stx::usize raw2 = static_cast<stx::usize>(offset);
+```
+
+---
+
+## Usage Patterns
+
+### Sequential Reading
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read header at start
+auto header = stx::readfs<Header>(file, stx::offset_t{0});
+
+// Read data blocks sequentially
+for (int i = 0; i < header.block_count; ++i) {
+    stx::offset_t block_offset{header.data_start + i * header.block_size};
+    auto block = stx::readfs<DataBlock>(file, block_offset);
+    process(block);
+}
+```
+
+### Random Access
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read table of contents
+auto toc = stx::readfs<TOC>(file, stx::offset_t{0});
+
+// Jump to specific section
+stx::setposfs(file, toc.sections[5].offset);
+auto section = stx::readfs<Section>(file);
+```
+
+### Relative Navigation
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read record
+auto record = stx::readfs<Record>(file);
+
+if (record.has_extended_data) {
+    // Skip standard padding
+    stx::skipfs(file, stx::offset_t{16});
+    
+    // Read extended section
+    auto extended = stx::readfs<ExtendedData>(file);
+}
+```
+
+### Backward Seeking
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read footer from end of file
+stx::setposfs(file, stx::offset_t{-64}, stx::origin::end);
+auto footer = stx::readfs<Footer>(file);
+
+// Use footer info to find data
+stx::setposfs(file, footer.data_offset);
+auto data = stx::readfs<DataSection>(file);
+```
+
+---
+
+## Design Rationale
+
+<Note>
+  The positioning API prioritizes explicitness over convenience:
+  - No implicit conversions from raw integers
+  - No automatic error handling
+  - No hidden state management
+  - Clear ownership of stream position
+</Note>
+
+### Type Safety Benefits
+
+1. **Prevents mixing different numeric types**
+   ```cpp
+   void seek(stx::offset_t pos);  // Only accepts offsets
+   // seek(42);           // ❌ Won't compile
+   // seek(record_id);    // ❌ Won't compile  
+   seek(stx::offset_t{42});  // ✅ Explicit
+   ```
+
+2. **Self-documenting code**
+   ```cpp
+   // Clear intent - this is a file offset
+   stx::offset_t header_pos{128};
+   ```
+
+3. **Compiler-enforced semantics**
+   ```cpp
+   stx::origin ref = stx::origin::begin;
+   // ref = 0;  // ❌ Won't compile
+   ```
+
+### Integration with STX
+
+The positioning functions integrate seamlessly with other STX types:
+
+```cpp
+// All STX types work together
+stx::offset_t pos{128};
+stx::origin ref = stx::origin::begin;
+
+stx::setposfs(file, pos, ref);
+auto value = stx::readfs<stx::u32>(file);
+```

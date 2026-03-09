@@ -1,0 +1,555 @@
+---
+title: 'Memory Patching'
+description: 'Runtime memory patching and modification using STX memory utilities'
+icon: 'memory'
+---
+
+This example demonstrates how to perform safe, low-level memory patching using STX's memory utilities. We'll cover reading, writing, and modifying process memory with proper alignment handling and type safety.
+
+## Overview
+
+Memory patching is essential for:
+- Runtime code modification and hooking
+- Game modding and trainers
+- Debugging and instrumentation
+- Security research and reverse engineering
+
+<Warning>
+  Memory patching can crash your application if done incorrectly. Always validate addresses and handle exceptions appropriately.
+</Warning>
+
+## Memory Read/Write Operations
+
+<Steps>
+  <Step title="Basic Memory Reading">
+    STX provides two ways to read memory: safe copy-based reads and fast direct reads.
+
+    ```cpp
+    #include <lbyte/stx.hpp>
+    #include <print>
+    
+    using namespace stx;
+    
+    void demonstrate_memory_reads() {
+        // Allocate some test data
+        struct PlayerData {
+            i32 health;
+            i32 mana;
+            f32 position[3];
+            u64 experience;
+        };
+        
+        PlayerData player{
+            .health = 100,
+            .mana = 50,
+            .position = {10.5f, 20.3f, 5.0f},
+            .experience = 1500
+        };
+        
+        void* player_addr = &player;
+        
+        // Safe copy-based read - works with unaligned memory
+        auto health = read<i32>(player_addr, offset_t{0});
+        std::println("Health: {}", health);
+        
+        // Read at offset
+        auto mana = read<i32>(player_addr, offset_t{sizeof(i32)});
+        std::println("Mana: {}", mana);
+        
+        // Read floating point values
+        auto pos_x = read<f32>(player_addr, offset_t{sizeof(i32) * 2});
+        auto pos_y = read<f32>(player_addr, offset_t{sizeof(i32) * 2 + sizeof(f32)});
+        auto pos_z = read<f32>(player_addr, offset_t{sizeof(i32) * 2 + sizeof(f32) * 2});
+        std::println("Position: ({:.1f}, {:.1f}, {:.1f})", pos_x, pos_y, pos_z);
+        
+        // Read 64-bit values
+        auto xp = read<u64>(player_addr, offset_t{sizeof(i32) * 2 + sizeof(f32) * 3});
+        std::println("Experience: {}", xp);
+        
+        // Fast direct read - requires proper alignment
+        auto health_fast = read_raw<i32>(player_addr, offset_t{0});
+        std::println("Health (fast): {}", health_fast);
+    }
+    ```
+
+    <Note>
+      Use `read<T>()` for safety and portability. Use `read_raw<T>()` only when you've verified alignment and need maximum performance.
+    </Note>
+  </Step>
+
+  <Step title="Memory Writing and Patching">
+    Modify memory safely with type checking and alignment handling:
+
+    ```cpp
+    class MemoryPatcher {
+    private:
+        void* base_address;
+        
+    public:
+        explicit MemoryPatcher(void* addr) : base_address(addr) {}
+        
+        // Patch an integer value
+        void patch_int(offset_t offset, i32 new_value) {
+            std::println("Patching i32 at offset 0x{:X}", offset.get());
+            
+            // Read original value
+            auto original = read<i32>(base_address, offset);
+            std::println("  Original: {}", original);
+            
+            // Write new value
+            write<i32>(base_address, offset, new_value);
+            
+            // Verify the write
+            auto current = read<i32>(base_address, offset);
+            std::println("  New value: {}", current);
+            
+            if (current == new_value) {
+                std::println("  [+] Patch successful!");
+            } else {
+                std::println("  [!] Patch failed!");
+            }
+        }
+        
+        // Patch a float value
+        void patch_float(offset_t offset, f32 new_value) {
+            auto original = read<f32>(base_address, offset);
+            std::println("Patching f32: {:.2f} -> {:.2f}", original, new_value);
+            write<f32>(base_address, offset, new_value);
+        }
+        
+        // Patch multiple bytes
+        void patch_bytes(offset_t offset, const std::span<const u8> bytes) {
+            std::println("Patching {} bytes at offset 0x{:X}", 
+                       bytes.size(), offset.get());
+            
+            for (usize i = 0; i < bytes.size(); ++i) {
+                write<u8>(base_address, offset + i, bytes[i]);
+            }
+            
+            std::println("  [+] Bytes patched");
+        }
+        
+        // Patch a structure
+        template<typename T>
+        void patch_struct(offset_t offset, const T& new_data) {
+            static_assert(std::is_trivially_copyable_v<T>);
+            write<T>(base_address, offset, new_data);
+            std::println("Patched {} bytes (struct)", sizeof(T));
+        }
+        
+        // Compare memory regions
+        bool compare(offset_t offset, const std::span<const u8> pattern) {
+            for (usize i = 0; i < pattern.size(); ++i) {
+                auto byte = read<u8>(base_address, offset + i);
+                if (byte != pattern[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
+    
+    void demonstrate_patching() {
+        struct GameState {
+            i32 score;
+            f32 time_remaining;
+            u8 level;
+            u8 lives;
+        };
+        
+        GameState game{100, 60.0f, 1, 3};
+        
+        MemoryPatcher patcher{&game};
+        
+        // Patch score
+        patcher.patch_int(offset_t{0}, 99999);
+        
+        // Patch time
+        patcher.patch_float(
+            offset_t{sizeof(i32)}, 
+            999.9f
+        );
+        
+        // Patch multiple bytes (level and lives)
+        std::array<u8, 2> max_stats{99, 99};
+        patcher.patch_bytes(
+            offset_t{sizeof(i32) + sizeof(f32)},
+            max_stats
+        );
+        
+        std::println("\nFinal state:");
+        std::println("  Score: {}", game.score);
+        std::println("  Time: {:.1f}", game.time_remaining);
+        std::println("  Level: {}", game.level);
+        std::println("  Lives: {}", game.lives);
+    }
+    ```
+  </Step>
+
+  <Step title="Code Patching with Disassembly Context">
+    Patch executable code with proper instruction handling:
+
+    ```cpp
+    class CodePatcher {
+    private:
+        void* code_base;
+        
+    public:
+        explicit CodePatcher(void* code_addr) : code_base(code_addr) {}
+        
+        // NOP out instructions (0x90 = NOP on x86/x64)
+        void nop_instruction(offset_t offset, usize count = 1) {
+            std::println("NOPing {} bytes at offset 0x{:X}", count, offset.get());
+            
+            for (usize i = 0; i < count; ++i) {
+                write<u8>(code_base, offset + i, 0x90);
+            }
+        }
+        
+        // Patch a near jump (x64: E9 xx xx xx xx)
+        void patch_near_jmp(offset_t at_offset, iptr target_offset) {
+            std::println("Patching near JMP at 0x{:X}", at_offset.get());
+            
+            // E9 opcode
+            write<u8>(code_base, at_offset, 0xE9);
+            
+            // Relative offset (from end of instruction)
+            i32 relative = static_cast<i32>(
+                target_offset - static_cast<iptr>(at_offset.get()) - 5
+            );
+            
+            write<i32>(code_base, at_offset + 1, relative);
+            std::println("  Relative offset: 0x{:08X}", 
+                       static_cast<u32>(relative));
+        }
+        
+        // Patch a conditional jump to always jump (x64: 0F 8x -> EB)
+        void force_short_jmp(offset_t offset) {
+            // Check if it's a conditional jump (0F 8x)
+            auto opcode1 = read<u8>(code_base, offset);
+            auto opcode2 = read<u8>(code_base, offset + 1);
+            
+            if (opcode1 == 0x0F && (opcode2 & 0xF0) == 0x80) {
+                std::println("Converting conditional to unconditional jump");
+                
+                // Read the 32-bit offset
+                auto offset_val = read<i32>(code_base, offset + 2);
+                
+                // Convert to short jump if possible
+                if (offset_val >= -128 && offset_val <= 127) {
+                    write<u8>(code_base, offset, 0xEB);  // JMP short
+                    write<u8>(code_base, offset + 1, static_cast<u8>(offset_val));
+                    
+                    // NOP the remaining bytes
+                    nop_instruction(offset + 2, 4);
+                }
+            }
+        }
+        
+        // Write a call instruction (x64: E8 xx xx xx xx)
+        void patch_call(offset_t at_offset, void* target_function) {
+            write<u8>(code_base, at_offset, 0xE8);
+            
+            auto current_addr = reinterpret_cast<uptr>(code_base) + at_offset.get();
+            auto target_addr = reinterpret_cast<uptr>(target_function);
+            
+            i32 relative = static_cast<i32>(
+                static_cast<iptr>(target_addr) - 
+                static_cast<iptr>(current_addr) - 5
+            );
+            
+            write<i32>(code_base, at_offset + 1, relative);
+        }
+        
+        // Create a trampoline for hooking
+        std::vector<u8> create_trampoline(offset_t original_offset, usize preserve_bytes) {
+            std::vector<u8> trampoline;
+            trampoline.reserve(preserve_bytes + 5);
+            
+            // Copy original bytes
+            for (usize i = 0; i < preserve_bytes; ++i) {
+                auto byte = read<u8>(code_base, original_offset + i);
+                trampoline.push_back(byte);
+            }
+            
+            // Add jump back (E9 opcode + relative offset)
+            trampoline.push_back(0xE9);
+            
+            // Calculate jump back offset
+            // (This is simplified - real trampolines need relocation)
+            i32 jmp_back = static_cast<i32>(preserve_bytes);
+            auto* offset_ptr = reinterpret_cast<u8*>(&jmp_back);
+            for (int i = 0; i < 4; ++i) {
+                trampoline.push_back(offset_ptr[i]);
+            }
+            
+            return trampoline;
+        }
+    };
+    ```
+
+    <Warning>
+      Code patching requires careful attention to instruction boundaries and may need memory protection changes (e.g., VirtualProtect on Windows).
+    </Warning>
+  </Step>
+
+  <Step title="Memory Scanning and Pattern Matching">
+    Find specific byte patterns in memory:
+
+    ```cpp
+    class MemoryScanner {
+    private:
+        const u8* memory;
+        usize size;
+        
+    public:
+        MemoryScanner(const void* base, usize region_size) 
+            : memory(static_cast<const u8*>(base))
+            , size(region_size) {}
+        
+        // Find a byte pattern
+        std::vector<offset_t> find_pattern(
+            const std::span<const u8> pattern,
+            const std::span<const bool> mask
+        ) {
+            std::vector<offset_t> results;
+            
+            for (usize i = 0; i <= size - pattern.size(); ++i) {
+                bool match = true;
+                
+                for (usize j = 0; j < pattern.size(); ++j) {
+                    if (mask[j]) {  // Check if this byte should be compared
+                        auto byte = read<u8>(memory, offset_t{i + j});
+                        if (byte != pattern[j]) {
+                            match = false;
+                            break;
+                        }
+                    }
+                }
+                
+                if (match) {
+                    results.push_back(offset_t{i});
+                }
+            }
+            
+            return results;
+        }
+        
+        // Find AOB (Array of Bytes) pattern with wildcards
+        // Example: "48 8B 0D ?? ?? ?? ?? E8" where ?? is wildcard
+        std::vector<offset_t> find_aob_pattern(std::string_view pattern) {
+            std::vector<u8> bytes;
+            std::vector<bool> mask;
+            
+            // Parse pattern string
+            // (Simplified parser)
+            // Real implementation would parse hex strings
+            
+            return find_pattern(bytes, mask);
+        }
+        
+        // Find integer value
+        std::vector<offset_t> find_int(i32 value) {
+            std::vector<offset_t> results;
+            
+            for (usize i = 0; i <= size - sizeof(i32); ++i) {
+                auto current = read<i32>(memory, offset_t{i});
+                if (current == value) {
+                    results.push_back(offset_t{i});
+                }
+            }
+            
+            return results;
+        }
+        
+        // Find string
+        std::vector<offset_t> find_string(std::string_view str) {
+            std::vector<offset_t> results;
+            
+            for (usize i = 0; i <= size - str.size(); ++i) {
+                bool match = true;
+                
+                for (usize j = 0; j < str.size(); ++j) {
+                    auto byte = read<u8>(memory, offset_t{i + j});
+                    if (byte != static_cast<u8>(str[j])) {
+                        match = false;
+                        break;
+                    }
+                }
+                
+                if (match) {
+                    results.push_back(offset_t{i});
+                }
+            }
+            
+            return results;
+        }
+    };
+    
+    void demonstrate_scanning() {
+        // Create test memory region
+        std::vector<u8> memory(4096);
+        
+        // Write some test data
+        i32 magic_value = 0xDEADBEEF;
+        std::memcpy(memory.data() + 100, &magic_value, sizeof(magic_value));
+        std::memcpy(memory.data() + 500, &magic_value, sizeof(magic_value));
+        
+        MemoryScanner scanner{memory.data(), memory.size()};
+        
+        auto results = scanner.find_int(0xDEADBEEF);
+        
+        std::println("Found {} occurrences:", results.size());
+        for (const auto& offset : results) {
+            std::println("  0x{:08X}", offset.get());
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Memory Alignment Utilities">
+    Use STX alignment functions for proper memory management:
+
+    ```cpp
+    void demonstrate_alignment() {
+        // Align addresses to boundaries
+        uptr addr = 0x1234;
+        
+        auto aligned_up_16 = align_up(addr, 16);
+        std::println("0x{:X} aligned up to 16: 0x{:X}", addr, aligned_up_16);
+        
+        auto aligned_down_16 = align_down(addr, 16);
+        std::println("0x{:X} aligned down to 16: 0x{:X}", addr, aligned_down_16);
+        
+        // Align offsets (works with strong types)
+        offset_t offset{0x1234};
+        auto aligned_offset = align_up(offset, 4096);  // Page alignment
+        std::println("Offset 0x{:X} aligned to page: 0x{:X}", 
+                   offset.get(), aligned_offset.get());
+        
+        // Practical example: allocate aligned memory
+        usize size = 1000;
+        usize alignment = 64;  // Cache line alignment
+        
+        usize aligned_size = align_up(size, alignment);
+        std::println("Allocating {} bytes (aligned to {}: {})", 
+                   size, alignment, aligned_size);
+    }
+    ```
+
+    <Tip>
+      Proper alignment improves performance and is required for some CPU instructions (e.g., SSE, AVX).
+    </Tip>
+  </Step>
+
+  <Step title="Memory Dumping for Debugging">
+    Visualize memory contents with STX's colored hex dump:
+
+    ```cpp
+    void demonstrate_memory_dump() {
+        // Create test data
+        struct ComplexData {
+            u32 magic;
+            u32 version;
+            u8 flags[8];
+            f64 timestamp;
+            char name[16];
+        };
+        
+        ComplexData data{
+            .magic = 0xCAFEBABE,
+            .version = 0x00010002,
+            .flags = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80},
+            .timestamp = 1234567890.123,
+            .name = "TestData"
+        };
+        
+        std::println("Memory dump of ComplexData:");
+        std::println("Size: {} bytes\n", sizeof(ComplexData));
+        
+        // Dump the entire structure
+        dump(&data, sizeof(ComplexData));
+        
+        std::println("\nField analysis:");
+        std::println("  magic @ +0x00: 0x{:08X}", 
+                   read<u32>(&data, offset_t{0}));
+        std::println("  version @ +0x04: 0x{:08X}", 
+                   read<u32>(&data, offset_t{4}));
+        std::println("  flags[0] @ +0x08: 0x{:02X}", 
+                   read<u8>(&data, offset_t{8}));
+    }
+    ```
+
+    The `dump()` function produces ANSI-colored output:
+    ```
+    0x00007ffd1234: ca fe ba be 00 01 00 02 01 02 04 08 10 20 40 80 |................|
+    0x00007ffd1244: 41 d2 65 80 b4 87 39 45 54 65 73 74 44 61 74 61 |A.e...9ETestData|
+    ```
+  </Step>
+</Steps>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose the Right Read/Write Function">
+    - Use `read<T>()` and `write<T>()` by default - they're safe for unaligned memory
+    - Use `read_raw<T>()` and `write_raw<T>()` only when:
+      - You've verified the address is properly aligned
+      - Performance profiling shows it's a bottleneck
+      - You're in a tight inner loop processing aligned data
+  </Accordion>
+  
+  <Accordion title="Handle Memory Protection">
+    On Windows, use VirtualProtect before patching:
+    ```cpp
+    DWORD old_protect;
+    VirtualProtect(address, size, PAGE_EXECUTE_READWRITE, &old_protect);
+    // ... perform patches ...
+    VirtualProtect(address, size, old_protect, &old_protect);
+    ```
+    
+    On Linux, use mprotect:
+    ```cpp
+    mprotect(aligned_address, size, PROT_READ | PROT_WRITE | PROT_EXEC);
+    ```
+  </Accordion>
+  
+  <Accordion title="Validate Addresses">
+    Always validate addresses before patching:
+    ```cpp
+    bool is_valid_address(void* addr) {
+        #ifdef _WIN32
+            MEMORY_BASIC_INFORMATION mbi;
+            if (VirtualQuery(addr, &mbi, sizeof(mbi))) {
+                return (mbi.State == MEM_COMMIT) && 
+                       (mbi.Protect != PAGE_NOACCESS);
+            }
+            return false;
+        #else
+            // Use /proc/self/maps on Linux
+            return true;  // Simplified
+        #endif
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="PE Parser" href="/examples/pe-parser" icon="file-binary">
+    Learn to parse PE files to find patchable code sections
+  </Card>
+  
+  <Card title="Binary Analysis" href="/examples/binary-analysis" icon="magnifying-glass-chart">
+    Analyze binaries to identify patching targets
+  </Card>
+  
+  <Card title="Memory API" href="/api/memory/read-write" icon="book">
+    Full reference for memory utilities
+  </Card>
+  
+  <Card title="Function Hooks" href="/api/functions/caller" icon="link">
+    Learn about function hooking with caller_t
+  </Card>
+</CardGroup>

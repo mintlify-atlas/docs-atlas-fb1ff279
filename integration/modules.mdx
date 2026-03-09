@@ -1,0 +1,279 @@
+---
+title: C++ Modules
+description: Configure and troubleshoot C++23 modules for STX
+icon: cube
+---
+
+STX provides full C++23 modules support as an alternative to traditional header-only usage, offering faster compilation times and better dependency management.
+
+## Why Use Modules?
+
+<CardGroup cols={2}>
+  <Card title="Faster Compilation" icon="bolt">
+    Modules are compiled once and reused, reducing rebuild times
+  </Card>
+  <Card title="Better Isolation" icon="shield">
+    No macro leakage or header pollution between translation units
+  </Card>
+  <Card title="Cleaner Imports" icon="code">
+    Replace `#include` with clean `import` statements
+  </Card>
+  <Card title="Improved Build Scaling" icon="chart-line">
+    Better parallelization and dependency tracking
+  </Card>
+</CardGroup>
+
+## System Requirements
+
+<Warning>
+  C++ Modules require modern toolchains. Ensure you meet these minimum requirements:
+</Warning>
+
+### Build System
+
+- **CMake**: 3.28 or later
+- **Xmake**: 2.8.0 or later
+
+### Compilers
+
+| Compiler | Minimum Version | Notes |
+|----------|----------------|-------|
+| **Clang** | 16.0+ | Recommended for best modules support |
+| **GCC** | 14.0+ | Requires `-fmodules-ts` flag |
+| **MSVC** | 19.34+ (VS 2022 17.4+) | Windows only |
+
+## Available Modules
+
+STX provides these module units:
+
+| Module | Import Statement | Description |
+|--------|------------------|-------------|
+| **stx** | `import lbyte.stx;` | All STX utilities (recommended) |
+| **core** | `import lbyte.stx.core;` | Core types and utilities |
+| **mem** | `import lbyte.stx.mem;` | Memory utilities |
+| **time** | `import lbyte.stx.time;` | Time and stopwatch utilities |
+
+## Setup Instructions
+
+<Tabs>
+  <Tab title="CMake">
+    <Steps>
+      <Step title="Enable modules in CMake">
+        Set the module option **before** adding STX:
+        
+        ```cmake
+        set(STX_USE_MODULES ON CACHE BOOL "" FORCE)
+        add_subdirectory(extern/stx)
+        # or with FetchContent:
+        # FetchContent_MakeAvailable(stx)
+        ```
+      </Step>
+
+      <Step title="Link against STX">
+        ```cmake
+        target_link_libraries(your-target PRIVATE lbyte::stx)
+        ```
+      </Step>
+
+      <Step title="Use in your code">
+        ```cpp
+        import lbyte.stx;
+        
+        using namespace stx;
+        
+        auto main() -> int {
+            // Use STX utilities
+            return 0;
+        }
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Xmake">
+    <Steps>
+      <Step title="Enable modules in package config">
+        ```lua
+        add_requires( "zethcxx.stx v2.0.0", { 
+            configs = { use_modules = true } 
+        })
+        ```
+      </Step>
+
+      <Step title="Configure target policies">
+        ```lua
+        target("your-target")
+            set_kind("binary")
+            set_languages("cxx23")
+            add_packages("zethcxx.stx")
+            
+            -- Enable module compilation
+            set_policy("build.c++.modules", true)
+            
+            -- Optional: disable if std module issues occur
+            set_policy("build.c++.modules.std", false)
+        ```
+      </Step>
+
+      <Step title="Use in your code">
+        ```cpp
+        import lbyte.stx;
+        
+        using namespace stx;
+        
+        auto main() -> int {
+            // Use STX utilities
+            return 0;
+        }
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+### Missing Clang Resource Headers
+
+When using C++ Modules with Clang, you might encounter errors like:
+
+```
+fatal error: 'stddef.h' file not found
+fatal error: '__stddef_max_align_t.h' file not found
+```
+
+**Cause**: The compiler cannot locate its internal resource directory.
+
+<Steps>
+  <Step title="Identify your Clang version">
+    ```bash
+    clang++ --version
+    ```
+  </Step>
+
+  <Step title="Find the resource directory">
+    ```bash
+    clang++ -print-resource-dir
+    # Example output: /usr/lib/clang/21
+    ```
+  </Step>
+
+  <Step title="Export the include path">
+    Add the `include` subdirectory to your environment:
+    
+    ```bash
+    # For Clang 21 (adjust version as needed)
+    export CPLUS_INCLUDE_PATH="/usr/lib/clang/21/include/:$CPLUS_INCLUDE_PATH"
+    ```
+    
+    Make this permanent by adding to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.)
+  </Step>
+
+  <Step title="Rebuild your project">
+    ```bash
+    cmake --build build --clean-first
+    # or
+    xmake -r
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  This issue is most common on Linux systems with manually installed Clang. System-provided Clang packages typically configure this automatically.
+</Note>
+
+### Module BMI Cache Issues
+
+If you encounter stale module cache errors:
+
+<CodeGroup>
+  ```bash CMake
+  # Clear CMake cache and rebuild
+  rm -rf build/
+  cmake -B build
+  cmake --build build
+  ```
+
+  ```bash Xmake
+  # Clean and rebuild
+  xmake clean -a
+  xmake
+  ```
+</CodeGroup>
+
+### Standard Library Module Conflicts
+
+With Xmake, if you encounter issues with standard library modules:
+
+```lua
+set_policy("build.c++.modules.std", false)
+```
+
+This disables automatic standard library module imports, resolving conflicts with certain compiler configurations.
+
+### Compiler-Specific Notes
+
+<AccordionGroup>
+  <Accordion title="Clang" icon="code">
+    - Use Clang 16+ for stable modules support
+    - Clang 18+ recommended for best compatibility
+    - Ensure `libc++` is available if using on Linux
+  </Accordion>
+
+  <Accordion title="GCC" icon="code">
+    - Requires GCC 14+ with `-fmodules-ts`
+    - Module support is experimental; prefer Clang if issues arise
+    - May require additional flags: `-std=c++23 -fmodules-ts`
+  </Accordion>
+
+  <Accordion title="MSVC" icon="windows">
+    - Requires Visual Studio 2022 17.4+ (MSVC 19.34+)
+    - Enable in project properties: C/C++ → Language → Enable C++ Modules: Yes
+    - Ensure `/std:c++latest` is set
+  </Accordion>
+</AccordionGroup>
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="First Build" icon="clock">
+    Initial module compilation may take longer as BMI (Binary Module Interface) files are generated
+  </Card>
+  <Card title="Incremental Builds" icon="rocket">
+    Subsequent builds are significantly faster since modules are pre-compiled
+  </Card>
+</CardGroup>
+
+## Fallback to Header-Only
+
+If you encounter persistent issues with modules, STX gracefully falls back to header-only mode:
+
+<CodeGroup>
+  ```cmake CMake
+  # Simply omit or set to OFF
+  set(STX_USE_MODULES OFF)
+  add_subdirectory(extern/stx)
+  ```
+
+  ```lua Xmake
+  # Omit the use_modules config
+  add_requires( "zethcxx.stx v2.0.0" )
+  ```
+</CodeGroup>
+
+Then use traditional includes:
+
+```cpp
+#include <lbyte/stx.hpp>
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CMake Integration" icon="hammer" href="/integration/cmake">
+    CMake setup and configuration
+  </Card>
+  <Card title="Xmake Integration" icon="box" href="/integration/xmake">
+    Xmake setup and configuration
+  </Card>
+</CardGroup>

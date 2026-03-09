@@ -1,0 +1,417 @@
+---
+title: 'PE File Parser'
+description: 'Build a complete PE file parser using STX file system utilities'
+icon: 'file-binary'
+---
+
+This example demonstrates how to build a comprehensive PE (Portable Executable) file parser using STX's type-safe file system utilities. We'll parse DOS headers, NT headers, section tables, and extract important metadata from Windows executables.
+
+## Overview
+
+PE files are the standard executable format for Windows. This parser will:
+- Read and validate DOS and NT headers
+- Parse the section table
+- Extract import and export information
+- Display file metadata with proper error handling
+
+<Note>
+  STX's `readfs` functions provide type-safe, strongly-typed file reading with zero overhead. The `offset_t` strong type prevents offset calculation errors at compile time.
+</Note>
+
+## Complete PE Parser Implementation
+
+<Steps>
+  <Step title="Define PE Structures">
+    First, let's define the Windows PE structures we'll be parsing. These are standard PE format structures.
+
+    ```cpp
+    #include <lbyte/stx.hpp>
+    #include <fstream>
+    #include <print>
+    
+    using namespace stx;
+    
+    // DOS Header (MZ header)
+    struct IMAGE_DOS_HEADER {
+        u16 e_magic;      // "MZ" signature
+        u16 e_cblp;
+        u16 e_cp;
+        u16 e_crlc;
+        u16 e_cparhdr;
+        u16 e_minalloc;
+        u16 e_maxalloc;
+        u16 e_ss;
+        u16 e_sp;
+        u16 e_csum;
+        u16 e_ip;
+        u16 e_cs;
+        u16 e_lfarlc;
+        u16 e_ovno;
+        u16 e_res[4];
+        u16 e_oemid;
+        u16 e_oeminfo;
+        u16 e_res2[10];
+        i32 e_lfanew;     // Offset to NT headers
+    };
+    
+    // File Header
+    struct IMAGE_FILE_HEADER {
+        u16 Machine;
+        u16 NumberOfSections;
+        u32 TimeDateStamp;
+        u32 PointerToSymbolTable;
+        u32 NumberOfSymbols;
+        u16 SizeOfOptionalHeader;
+        u16 Characteristics;
+    };
+    
+    // Optional Header (64-bit)
+    struct IMAGE_OPTIONAL_HEADER64 {
+        u16 Magic;
+        u8  MajorLinkerVersion;
+        u8  MinorLinkerVersion;
+        u32 SizeOfCode;
+        u32 SizeOfInitializedData;
+        u32 SizeOfUninitializedData;
+        u32 AddressOfEntryPoint;
+        u32 BaseOfCode;
+        u64 ImageBase;
+        u32 SectionAlignment;
+        u32 FileAlignment;
+        u16 MajorOperatingSystemVersion;
+        u16 MinorOperatingSystemVersion;
+        u16 MajorImageVersion;
+        u16 MinorImageVersion;
+        u16 MajorSubsystemVersion;
+        u16 MinorSubsystemVersion;
+        u32 Win32VersionValue;
+        u32 SizeOfImage;
+        u32 SizeOfHeaders;
+        u32 CheckSum;
+        u16 Subsystem;
+        u16 DllCharacteristics;
+        u64 SizeOfStackReserve;
+        u64 SizeOfStackCommit;
+        u64 SizeOfHeapReserve;
+        u64 SizeOfHeapCommit;
+        u32 LoaderFlags;
+        u32 NumberOfRvaAndSizes;
+    };
+    
+    // NT Headers
+    struct IMAGE_NT_HEADERS64 {
+        u32                      Signature;
+        IMAGE_FILE_HEADER        FileHeader;
+        IMAGE_OPTIONAL_HEADER64  OptionalHeader;
+    };
+    
+    // Section Header
+    struct IMAGE_SECTION_HEADER {
+        u8  Name[8];
+        u32 VirtualSize;
+        u32 VirtualAddress;
+        u32 SizeOfRawData;
+        u32 PointerToRawData;
+        u32 PointerToRelocations;
+        u32 PointerToLinenumbers;
+        u16 NumberOfRelocations;
+        u16 NumberOfLinenumbers;
+        u32 Characteristics;
+        
+        // Helper to get section name as string
+        auto get_name() const -> std::string_view {
+            usize len = 0;
+            while (len < 8 && Name[len] != '\0') ++len;
+            return std::string_view{reinterpret_cast<const char*>(Name), len};
+        }
+    };
+    ```
+
+    <Tip>
+      Adding helper methods like `get_name()` to your structures improves usability while maintaining binary layout compatibility.
+    </Tip>
+  </Step>
+
+  <Step title="Create the PE Parser Class">
+    Now let's create a parser class that encapsulates all parsing logic with proper error handling.
+
+    ```cpp
+    class PEParser {
+    private:
+        std::ifstream file;
+        IMAGE_DOS_HEADER dos_header;
+        IMAGE_NT_HEADERS64 nt_headers;
+        dirty_vector<IMAGE_SECTION_HEADER> sections;
+        
+    public:
+        explicit PEParser(const char* filepath) 
+            : file{filepath, std::ios::binary} 
+        {
+            if (!file.is_open()) {
+                throw std::runtime_error("Failed to open file");
+            }
+        }
+        
+        // Parse and validate the entire PE file
+        bool parse() {
+            if (!parse_dos_header()) return false;
+            if (!parse_nt_headers()) return false;
+            if (!parse_sections()) return false;
+            return true;
+        }
+        
+    private:
+        bool parse_dos_header() {
+            // Read DOS header from file beginning
+            dos_header = readfs<IMAGE_DOS_HEADER>(file);
+            
+            if (!last_read_ok(file)) {
+                std::println("Error: Failed to read DOS header");
+                return false;
+            }
+            
+            // Validate MZ signature
+            if (dos_header.e_magic != 0x5A4D) {  // "MZ"
+                std::println("Error: Invalid DOS signature: 0x{:04X}", 
+                           dos_header.e_magic);
+                return false;
+            }
+            
+            std::println("[+] Valid DOS header found");
+            std::println("    NT Headers offset: 0x{:X}", dos_header.e_lfanew);
+            return true;
+        }
+        
+        bool parse_nt_headers() {
+            // Read NT headers at offset specified in DOS header
+            nt_headers = readfs<IMAGE_NT_HEADERS64>(
+                file, 
+                offset_t{static_cast<usize>(dos_header.e_lfanew)}
+            );
+            
+            if (!last_read_ok(file)) {
+                std::println("Error: Failed to read NT headers");
+                return false;
+            }
+            
+            // Validate PE signature
+            if (nt_headers.Signature != 0x4550) {  // "PE\0\0"
+                std::println("Error: Invalid PE signature: 0x{:08X}", 
+                           nt_headers.Signature);
+                return false;
+            }
+            
+            std::println("[+] Valid PE signature found");
+            std::println("    Machine: 0x{:04X}", 
+                       nt_headers.FileHeader.Machine);
+            std::println("    Number of sections: {}", 
+                       nt_headers.FileHeader.NumberOfSections);
+            std::println("    Entry point RVA: 0x{:08X}", 
+                       nt_headers.OptionalHeader.AddressOfEntryPoint);
+            std::println("    Image base: 0x{:016X}", 
+                       nt_headers.OptionalHeader.ImageBase);
+            return true;
+        }
+        
+        bool parse_sections() {
+            // Calculate section table offset using strong types
+            auto sections_offset = offset_t{
+                static_cast<usize>(dos_header.e_lfanew)
+                + sizeof(u32)  // Signature
+                + sizeof(IMAGE_FILE_HEADER)
+                + nt_headers.FileHeader.SizeOfOptionalHeader
+            };
+            
+            // Bulk read all sections into optimized dirty_vector
+            sections = readfs<IMAGE_SECTION_HEADER>(
+                file,
+                sections_offset,
+                nt_headers.FileHeader.NumberOfSections
+            );
+            
+            if (!last_read_ok(file)) {
+                std::println("Error: Failed to read section table");
+                return false;
+            }
+            
+            std::println("\n[+] Section Table:");
+            std::println("    {:<10} {:<12} {:<12} {:<12}", 
+                       "Name", "VirtAddr", "VirtSize", "RawSize");
+            std::println("    {}", std::string(50, '-'));
+            
+            for (const auto& section : sections) {
+                std::println("    {:<10} 0x{:08X}   0x{:08X}   0x{:08X}",
+                           section.get_name(),
+                           section.VirtualAddress,
+                           section.VirtualSize,
+                           section.SizeOfRawData);
+            }
+            
+            return true;
+        }
+        
+    public:
+        // Access parsed data
+        const auto& get_sections() const { return sections; }
+        const auto& get_nt_headers() const { return nt_headers; }
+        
+        // Find section by name
+        const IMAGE_SECTION_HEADER* find_section(std::string_view name) const {
+            for (const auto& section : sections) {
+                if (section.get_name() == name) {
+                    return &section;
+                }
+            }
+            return nullptr;
+        }
+        
+        // Read data from a section
+        dirty_vector<u8> read_section_data(const IMAGE_SECTION_HEADER& section) {
+            return readfs<u8>(
+                file,
+                offset_t{section.PointerToRawData},
+                section.SizeOfRawData
+            );
+        }
+    };
+    ```
+
+    <Note>
+      The `dirty_vector` allocator avoids unnecessary zero-initialization, making bulk reads significantly faster for large section tables.
+    </Note>
+  </Step>
+
+  <Step title="Use the Parser">
+    Now we can use our PE parser to analyze executables:
+
+    ```cpp
+    auto main() -> int {
+        try {
+            PEParser parser{"C:\\Windows\\System32\\kernel32.dll"};
+            
+            std::println("Parsing PE file...\n");
+            
+            if (!parser.parse()) {
+                std::println("Failed to parse PE file");
+                return EXIT_FAILURE;
+            }
+            
+            // Find and analyze the .text section
+            if (auto* text_section = parser.find_section(".text")) {
+                std::println("\n[+] Analyzing .text section:");
+                std::println("    Virtual Address: 0x{:08X}", 
+                           text_section->VirtualAddress);
+                std::println("    Size: {} bytes", 
+                           text_section->SizeOfRawData);
+                
+                // Read the section data
+                auto code = parser.read_section_data(*text_section);
+                std::println("    Successfully read {} bytes of code", 
+                           code.size());
+            }
+            
+            // Iterate through all sections using STX ranges
+            std::println("\n[+] Section characteristics:");
+            const auto& sections = parser.get_sections();
+            
+            for (auto idx : range(sections.size(), range_dir::Forward)) {
+                const auto& sec = sections[idx];
+                std::println("    Section {}: {} (Characteristics: 0x{:08X})",
+                           idx, sec.get_name(), sec.Characteristics);
+            }
+            
+            std::println("\n[+] Parsing complete!");
+            return EXIT_SUCCESS;
+            
+        } catch (const std::exception& e) {
+            std::println("Error: {}", e.what());
+            return EXIT_FAILURE;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Advanced: Extract Import Directory">
+    Extend the parser to extract imported DLLs and functions:
+
+    ```cpp
+    struct ImportDescriptor {
+        std::string dll_name;
+        std::vector<std::string> functions;
+    };
+    
+    class PEParser {
+        // ... previous code ...
+        
+        std::vector<ImportDescriptor> parse_imports() {
+            std::vector<ImportDescriptor> imports;
+            
+            // Get import directory RVA from data directory
+            constexpr usize IMPORT_DIR_INDEX = 1;
+            auto import_rva = nt_headers.OptionalHeader.DataDirectory[IMPORT_DIR_INDEX].VirtualAddress;
+            
+            if (import_rva == 0) {
+                std::println("No imports found");
+                return imports;
+            }
+            
+            // Convert RVA to file offset using section table
+            auto file_offset = rva_to_offset(rva_t{import_rva});
+            
+            std::println("[+] Parsing imports...");
+            
+            // Read import descriptors until null entry
+            // This demonstrates advanced PE parsing with STX
+            // Implementation would continue here...
+            
+            return imports;
+        }
+        
+    private:
+        // Convert RVA to file offset
+        offset_t rva_to_offset(rva_t rva) const {
+            for (const auto& section : sections) {
+                u32 section_start = section.VirtualAddress;
+                u32 section_end = section_start + section.VirtualSize;
+                
+                if (rva.get() >= section_start && rva.get() < section_end) {
+                    u32 offset_in_section = rva.get() - section_start;
+                    return offset_t{section.PointerToRawData + offset_in_section};
+                }
+            }
+            throw std::runtime_error("RVA not found in any section");
+        }
+    };
+    ```
+
+    <Tip>
+      Strong types like `rva_t` and `offset_t` prevent mixing up virtual addresses with file offsets, catching bugs at compile time.
+    </Tip>
+  </Step>
+</Steps>
+
+## Key Takeaways
+
+<CardGroup cols={2}>
+  <Card title="Type Safety" icon="shield-check">
+    STX's strong types (`offset_t`, `rva_t`) prevent offset calculation errors and make code more maintainable.
+  </Card>
+  
+  <Card title="Zero Overhead" icon="gauge-high">
+    `readfs` functions compile to direct `fstream::read` calls with no runtime cost.
+  </Card>
+  
+  <Card title="Bulk Operations" icon="layer-group">
+    `dirty_vector` avoids unnecessary initialization, making large reads significantly faster.
+  </Card>
+  
+  <Card title="Error Handling" icon="triangle-exclamation">
+    `last_read_ok()` provides explicit stream state checking for robust file parsing.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+- Explore [Binary Analysis](/examples/binary-analysis) for pattern matching in PE files
+- Learn about [Memory Patching](/examples/memory-patching) to modify loaded PE images at runtime
+- Read the [File System API](/api/fs) reference for all available functions

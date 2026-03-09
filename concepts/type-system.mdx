@@ -1,0 +1,221 @@
+---
+title: "Type System"
+description: "Fixed-width numeric types and platform-consistent aliases for systems programming"
+---
+
+# Type System
+
+STX provides a comprehensive type system built on C++23 fixed-width integers and platform-specific types. These aliases ensure ABI stability, portability, and explicit size semantics across platforms.
+
+<Note>
+All STX types are defined in the `lbyte::stx` namespace and are based on standard library primitives from `<cstdint>` and `<cstddef>`.
+</Note>
+
+## Unsigned Integers
+
+Fixed-width unsigned integer types guarantee exact bit widths regardless of platform:
+
+| Type  | Underlying Type    | Size    | Range                    |
+|-------|-------------------|---------|-------------------------|
+| `u8`  | `std::uint8_t`    | 8 bits  | 0 to 255                |
+| `u16` | `std::uint16_t`   | 16 bits | 0 to 65,535             |
+| `u32` | `std::uint32_t`   | 32 bits | 0 to 4,294,967,295      |
+| `u64` | `std::uint64_t`   | 64 bits | 0 to 18,446,744,073,709,551,615 |
+
+### Usage Example
+
+```cpp
+using namespace lbyte::stx;
+
+u8  byte_value   = 0xFF;
+u16 port_number  = 8080;
+u32 magic_number = 0x4D5A5000;  // PE signature
+u64 large_offset = 0x140000000;
+```
+
+<Tip>
+Use unsigned types for bit manipulation, binary parsing, and cases where negative values are semantically invalid.
+</Tip>
+
+## Signed Integers
+
+Fixed-width signed integer types using two's complement representation:
+
+| Type  | Underlying Type   | Size    | Range                     |
+|-------|------------------|---------|---------------------------|
+| `i8`  | `std::int8_t`    | 8 bits  | -128 to 127               |
+| `i16` | `std::int16_t`   | 16 bits | -32,768 to 32,767         |
+| `i32` | `std::int32_t`   | 32 bits | -2,147,483,648 to 2,147,483,647 |
+| `i64` | `std::int64_t`   | 64 bits | -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 |
+
+### Usage Example
+
+```cpp
+using namespace lbyte::stx;
+
+i8  temperature  = -40;
+i16 coordinate_x = -1920;
+i32 delta_time   = -1000;
+i64 unix_time    = 1735689600;  // Seconds since epoch
+```
+
+## Floating Point Types
+
+Standard IEEE 754 floating point types with explicit precision:
+
+| Type  | Underlying Type | Precision |
+|-------|----------------|----------|
+| `f32` | `float`        | Single precision (32-bit) |
+| `f64` | `double`       | Double precision (64-bit) |
+
+### Usage Example
+
+```cpp
+using namespace lbyte::stx;
+
+f32 ratio = 1.618033f;  // Golden ratio
+f64 pi    = 3.141592653589793;
+```
+
+## Size and Pointer Types
+
+Platform-dependent types that match the architecture's native pointer and size widths:
+
+| Type    | Underlying Type      | Purpose                                  |
+|---------|---------------------|------------------------------------------|
+| `usize` | `std::size_t`       | Unsigned size type for array indexing and memory sizes |
+| `isize` | `std::ptrdiff_t`    | Signed size type for pointer differences and offsets |
+| `uptr`  | `std::uintptr_t`    | Unsigned integer capable of holding any pointer value |
+| `iptr`  | `std::intptr_t`     | Signed integer capable of holding any pointer value |
+
+<Info>
+On 64-bit systems, `usize`, `isize`, `uptr`, and `iptr` are all 64 bits. On 32-bit systems, they are 32 bits.
+</Info>
+
+### Usage Example
+
+```cpp
+using namespace lbyte::stx;
+
+// Memory sizing
+usize buffer_size = 1024;
+usize element_count = 256;
+
+// Pointer arithmetic domain
+int data[100];
+isize diff = &data[50] - &data[10];  // 40
+
+// Address representation
+void* ptr = &data[0];
+uptr addr = reinterpret_cast<uptr>(ptr);
+```
+
+## Type System Benefits
+
+<AccordionGroup>
+  <Accordion title="Explicit Size Semantics" icon="ruler">
+    Fixed-width types eliminate platform-specific ambiguities. A `u32` is always 32 bits, whether compiled on ARM, x86, or any other architecture.
+  </Accordion>
+  
+  <Accordion title="ABI Stability" icon="shield">
+    Using explicit-width types ensures binary layouts remain consistent across compiler versions and platforms, critical for binary format parsing.
+  </Accordion>
+  
+  <Accordion title="Readability" icon="glasses">
+    Short, consistent names (`u32` vs `unsigned int` or `uint32_t`) improve code clarity without sacrificing precision.
+  </Accordion>
+  
+  <Accordion title="Rust-like Ergonomics" icon="code">
+    Familiar syntax for developers from other systems programming languages while remaining idiomatic C++.
+  </Accordion>
+</AccordionGroup>
+
+## When to Use Each Type
+
+### Fixed-Width Types (`u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`)
+
+Use when:
+- Parsing binary formats (PE, ELF, network protocols)
+- Interfacing with hardware registers
+- Serialization and deserialization
+- Cryptographic operations
+- Exact bit-width is required
+
+```cpp
+struct dos_header
+{
+    u16 e_magic;     // Must be exactly 16 bits
+    u16 e_cblp;
+    u16 e_cp;
+    // ...
+    u32 e_lfanew;    // Must be exactly 32 bits
+};
+
+static_assert(sizeof(dos_header::e_magic) == 2);
+static_assert(sizeof(dos_header::e_lfanew) == 4);
+```
+
+### Platform-Sized Types (`usize`, `isize`, `uptr`, `iptr`)
+
+Use when:
+- Array indexing and sizes
+- Memory allocation sizes
+- Pointer differences
+- Address arithmetic
+- Container capacities
+
+```cpp
+template<typename T>
+class buffer
+{
+    T*     data_;
+    usize  size_;     // Natural size type
+    usize  capacity_; // Natural capacity type
+    
+public:
+    T& operator[](usize index) { return data_[index]; }
+    usize size() const { return size_; }
+};
+```
+
+## Compile-Time Guarantees
+
+All type sizes can be verified at compile time:
+
+```cpp
+using namespace lbyte::stx;
+
+// Verify exact sizes
+static_assert(sizeof(u8)  == 1);
+static_assert(sizeof(u16) == 2);
+static_assert(sizeof(u32) == 4);
+static_assert(sizeof(u64) == 8);
+
+static_assert(sizeof(i8)  == 1);
+static_assert(sizeof(i16) == 2);
+static_assert(sizeof(i32) == 4);
+static_assert(sizeof(i64) == 8);
+
+static_assert(sizeof(f32) == 4);
+static_assert(sizeof(f64) == 8);
+
+// Platform-dependent verification
+static_assert(sizeof(uptr) == sizeof(void*));
+static_assert(sizeof(iptr) == sizeof(void*));
+static_assert(sizeof(usize) == sizeof(void*));
+```
+
+<Note>
+The type system is designed to be constexpr-friendly. All fundamental operations on these types can be evaluated at compile time.
+</Note>
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Strong Types" icon="tag" href="/concepts/strong-types">
+    Learn about type-safe wrappers for addresses and offsets
+  </Card>
+  <Card title="Zero Overhead" icon="gauge-high" href="/concepts/zero-overhead">
+    Understand STX's zero-cost abstraction philosophy
+  </Card>
+</CardGroup>

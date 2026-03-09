@@ -1,0 +1,188 @@
+---
+title: Xmake Integration
+description: Integrate STX into your Xmake-based C++ project
+icon: box
+---
+
+STX is not yet available on **xrepo**, but you can easily add it as a custom package definition.
+
+## Requirements
+
+<Warning>
+  C++23 standard is required. For C++ Modules support, you need:
+  - Xmake 2.8.0+
+  - Clang 16+, GCC 14+, or MSVC 19.34+
+</Warning>
+
+## Custom Package Definition
+
+Add this package definition to your `xmake.lua` file:
+
+<Steps>
+  <Step title="Define the STX package">
+    ```lua xmake.lua
+    package("zethcxx.stx")
+        set_kind("library", { headeronly = true })
+        set_urls("https://github.com/zethcxx/stx.git")
+    
+        add_versions( "v1.0.0", "v1.0.0" ) -- Or commit hash
+        add_versions( "v2.0.0", "v2.0.0" )
+    
+        add_configs( "use_modules", {
+            builtin = false,
+            default = false,
+            type    = "boolean",
+            description = "Use C++ Modules"
+        })
+    
+        on_install( function( package )
+            local configs = {}
+    
+            if package:config( "use_modules" ) then
+                configs.use_modules = true
+            end
+    
+            import("package.tools.xmake").install( package, configs )
+        end)
+    
+        on_load( function( package )
+            package:add("includedirs", "include")
+    
+            if package:config("use_modules") then
+                package:add("cxxmodules", "modules/stx/*.cppm")
+            end
+        end)
+    
+        on_test( function (package)
+            package:check_cxxsnippets({ 
+                test = "import lbyte.stx; int main() { return 0; }"
+            }, { 
+                configs = { languages = "c++23" }
+            })
+        end)
+    package_end()
+    ```
+  </Step>
+
+  <Step title="Add as dependency">
+    <CodeGroup>
+      ```lua Header-only (default)
+      add_requires( "zethcxx.stx v2.0.0" )
+      
+      target("your-target")
+          set_kind("binary")
+          set_languages("cxx23")
+          add_files("src/*.cpp")
+          add_packages("zethcxx.stx")
+      ```
+
+      ```lua With C++ Modules
+      add_requires( "zethcxx.stx v2.0.0", { 
+          configs = { use_modules = true } 
+      })
+      
+      target("your-target")
+          set_kind("binary")
+          set_languages("cxx23")
+          add_files("src/*.cpp")
+          add_packages("zethcxx.stx")
+          
+          -- Enable C++ modules
+          set_policy("build.c++.modules", true)
+          
+          -- Disable if you have issues with std modules
+          set_policy("build.c++.modules.std", false)
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Build your project">
+    ```bash
+    xmake
+    ```
+  </Step>
+</Steps>
+
+## Usage in Code
+
+<CodeGroup>
+  ```cpp Header-only
+  #include <lbyte/stx.hpp>
+  // or for core only:
+  // #include <lbyte/stx/core.hpp>
+  
+  using namespace stx;
+  
+  auto main() -> int {
+      // Use STX utilities
+      return 0;
+  }
+  ```
+
+  ```cpp C++ Modules
+  import lbyte.stx;
+  
+  using namespace stx;
+  
+  auto main() -> int {
+      // Use STX utilities
+      return 0;
+  }
+  ```
+</CodeGroup>
+
+## Package Configuration
+
+| Config Option | Type | Default | Description |
+|---------------|------|---------|-------------|
+| `use_modules` | boolean | false | Enable C++23 modules instead of header-only |
+
+## Module Policies
+
+When using C++ Modules with Xmake, you may need to configure these policies:
+
+```lua
+-- Enable C++ modules compilation
+set_policy("build.c++.modules", true)
+
+-- Disable standard library modules if encountering errors
+set_policy("build.c++.modules.std", false)
+```
+
+<Note>
+  The `build.c++.modules.std` policy can be disabled if you encounter issues with standard library module compilation. This is a known workaround for certain compiler configurations.
+</Note>
+
+## Version Specification
+
+You can specify versions using:
+
+- **Git tags**: `"v2.0.0"`, `"v1.0.0"`
+- **Commit hashes**: Replace version string with full commit SHA
+
+```lua
+add_versions( "v2.0.0", "abc123def456..." )  -- Using commit hash
+```
+
+## Alternative: Local Package
+
+If you prefer to vendor STX locally:
+
+```lua
+target("your-target")
+    set_kind("binary")
+    set_languages("cxx23")
+    add_files("src/*.cpp")
+    add_includedirs("extern/stx/include")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CMake Integration" icon="hammer" href="/integration/cmake">
+    Learn how to use STX with CMake
+  </Card>
+  <Card title="C++ Modules Setup" icon="cube" href="/integration/modules">
+    Detailed modules configuration and troubleshooting
+  </Card>
+</CardGroup>

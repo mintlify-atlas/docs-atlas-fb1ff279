@@ -1,0 +1,123 @@
+---
+title: "Introduction"
+description: "Modern C++23 library for systems programming, binary analysis, and low-level memory manipulation"
+---
+
+# STX - Systems Toolbelt for C++23
+
+STX is a header-only C++23 library providing type-safe abstractions and utilities for systems programming, binary analysis, runtime instrumentation, and scripting at the OS/hardware interface.
+
+<Note>
+**Version 2.0.0** — This project is intended for personal use and experimentation. Users are free to fork or modify it, but all usage is at their own risk.
+</Note>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Header-Only" icon="file-code">
+    Zero dependencies beyond the C++23 standard library
+  </Card>
+  <Card title="Type Safety" icon="shield-check">
+    Strong types for offsets, addresses, and function signatures
+  </Card>
+  <Card title="Zero Overhead" icon="gauge-high">
+    Constexpr-friendly abstractions with no runtime cost
+  </Card>
+  <Card title="C++ Modules" icon="cube">
+    Optional module support for modern build systems
+  </Card>
+</CardGroup>
+
+## Core Capabilities
+
+STX provides six specialized modules for low-level programming:
+
+<AccordionGroup>
+  <Accordion title="Memory Utilities" icon="microchip">
+    Safe memory access, alignment primitives, and colored hexadecimal dumps for inspection and debugging.
+  </Accordion>
+  <Accordion title="File System" icon="folder-open">
+    Type-safe, binary-oriented file operations with explicit stream state management.
+  </Accordion>
+  <Accordion title="Functions" icon="function">
+    Strongly-typed wrappers around arbitrary memory addresses for callable functions.
+  </Accordion>
+  <Accordion title="Time Utilities" icon="clock">
+    Portable UNIX time conversions and high-resolution stopwatch functionality.
+  </Accordion>
+  <Accordion title="Ranges" icon="arrows-left-right">
+    Domain-safe, constexpr-friendly integer and strong-type ranges for iteration.
+  </Accordion>
+  <Accordion title="Core Types" icon="cube">
+    Fundamental fixed-width types, strong types, and compile-time concepts.
+  </Accordion>
+</AccordionGroup>
+
+## Use Cases
+
+STX is designed for developers working in:
+
+- **Binary Analysis** — PE/ELF/Mach-O parsers and format analysis tools
+- **Runtime Patching** — Memory manipulation and code injection
+- **Reverse Engineering** — Low-level inspection and instrumentation utilities
+- **Systems Programming** — Loader implementations and OS interface tooling
+- **Security Research** — Red teaming and vulnerability research tools
+
+## Quick Example
+
+```cpp example.cpp
+#include <lbyte/stx.hpp>
+#include <fstream>
+
+using namespace stx;
+
+auto main() -> int
+{
+    std::ifstream file { "target.dll", std::ios::binary };
+    if ( not file.is_open() ) return EXIT_FAILURE;
+
+    // Read DOS and NT headers with type safety
+    auto dos = readfs<IMAGE_DOS_HEADER>(file);
+    auto nt = readfs<IMAGE_NT_HEADERS64>(file, offset_t{dos.e_lfanew});
+
+    // Calculate section table offset
+    auto sections_offset = offset_t{
+        dos.e_lfanew
+        + sizeof(u32)
+        + sizeof(IMAGE_FILE_HEADER)
+        + nt.FileHeader.SizeOfOptionalHeader
+    };
+
+    // Bulk read sections into optimized buffer
+    auto sections = readfs<IMAGE_SECTION_HEADER>(
+        file,
+        sections_offset,
+        nt.FileHeader.NumberOfSections
+    );
+
+    for (const auto& sec : sections) {
+        println("Section: {}", sec.get_name());
+    }
+
+    return EXIT_SUCCESS;
+}
+```
+
+This demonstrates type-safe file reading, strong-type offset arithmetic, and zero-overhead bulk allocation with `dirty_vector`.
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Installation guide for CMake and Xmake
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/core/types">
+    Explore the complete API documentation
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/pe-parser">
+    Learn from real-world examples
+  </Card>
+</CardGroup>

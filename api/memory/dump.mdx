@@ -1,0 +1,413 @@
+---
+title: "Memory Dump"
+description: "Colored hexadecimal memory inspection with ASCII visualization"
+---
+
+# Memory Dump
+
+The `dump()` function provides a formatted hexadecimal view of memory with ASCII representation, similar to tools like `hexdump` or `xxd`, but with ANSI color support and optimized for debugging and binary analysis.
+
+## Function Signature
+
+```cpp
+[[gnu::no_sanitize("address")]]
+void dump(address_like auto base, usize size) noexcept;
+```
+
+<ParamField path="base" type="address_like auto" required>
+  Base address to start dumping from. Accepts raw pointers, `va_t`, `rva_t`, or any address-like type.
+</ParamField>
+
+<ParamField path="size" type="usize" required>
+  Number of bytes to dump.
+</ParamField>
+
+## Output Format
+
+Each line displays 16 bytes in the following format:
+
+```
+0xADDRESS: XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX |ASCII..........|
+```
+
+### Format Breakdown
+
+| Component | Description |
+|-----------|-------------|
+| `0xADDRESS` | Memory address (colorized in blue) |
+| `: ` | Separator |
+| `XX XX ...` | Hexadecimal bytes (space-separated) |
+| `\|` | ASCII column delimiter |
+| `ASCII...` | ASCII representation (`.` for non-printable) |
+| `\|` | Closing delimiter |
+
+## Basic Usage
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Dump memory region
+void* buffer = get_memory_buffer();
+dump(buffer, 128);
+
+// Dump from virtual address
+va_t module_base{0x140000000};
+dump(module_base, 256);
+
+// Dump structure
+struct Header {
+    u32 magic;
+    u32 version;
+    u64 timestamp;
+};
+
+Header h{0x5A4D, 1, 1234567890};
+dump(&h, sizeof(Header));
+```
+
+## Example Output
+
+```
+0x00007ffc8a2b1000: 4d 5a 90 00 03 00 00 00 04 00 00 00 ff ff 00 00 |MZ..............
+0x00007ffc8a2b1010: b8 00 00 00 00 00 00 00 40 00 00 00 00 00 00 00 |........@.......
+0x00007ffc8a2b1020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................|
+0x00007ffc8a2b1030: 00 00 00 00 00 00 00 00 00 00 00 00 f0 00 00 00 |................|
+0x00007ffc8a2b1040: 0e 1f ba 0e 00 b4 09 cd 21 b8 01 4c cd 21 54 68 |........!..L.!Th|
+0x00007ffc8a2b1050: 69 73 20 70 72 6f 67 72 61 6d 20 63 61 6e 6e 6f |is program canno|
+0x00007ffc8a2b1060: 74 20 62 65 20 72 75 6e 20 69 6e 20 44 4f 53 20 |t be run in DOS |
+0x00007ffc8a2b1070: 6d 6f 64 65 2e 0d 0d 0a 24 00 00 00 00 00 00 00 |mode....$.......|
+```
+
+## Features
+
+### Colorized Addresses
+
+Addresses are displayed in blue (ANSI color code `\x1b[38;5;12m`) for improved readability:
+
+```cpp
+using namespace lbyte::stx;
+
+va_t addr{0x140001000};
+dump(addr, 64);
+// Output shows addresses in blue when displayed in color-capable terminals
+```
+
+### ASCII Visualization
+
+Printable ASCII characters (32-126) are shown directly; others are replaced with `.`:
+
+```cpp
+using namespace lbyte::stx;
+
+const char text[] = "Hello, World!\x00\x01\x02";
+dump(text, sizeof(text));
+// ASCII column shows: |Hello, World!...|
+```
+
+### Partial Lines
+
+If the dump size is not a multiple of 16, the last line is properly padded:
+
+```cpp
+using namespace lbyte::stx;
+
+u8 data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
+dump(data, 5);
+// Output:
+// 0x...: 01 02 03 04 05                                  |.....           |
+```
+
+## Address Width
+
+The address field width adapts to the platform:
+
+| Platform | Address Width | Example |
+|----------|--------------|----------|
+| 32-bit | 8 hex digits | `0x12345678` |
+| 64-bit | 16 hex digits | `0x00007ffc8a2b1000` |
+
+## Implementation Details
+
+### Thread Safety
+
+The function uses a thread-local buffer, making it safe for concurrent use:
+
+```cpp
+static thread_local std::array<u8, PTR_HEX_WIDTH + 84> buff_line;
+```
+
+Each thread has its own buffer, preventing data races.
+
+### Performance Optimizations
+
+- Manual hexadecimal encoding (no `std::format` overhead)
+- Direct memory manipulation instead of stream operations
+- Thread-local buffer eliminates allocation overhead
+- Single `std::println()` call per line
+
+### AddressSanitizer Attribute
+
+The function is marked with `[[gnu::no_sanitize("address")]]` to allow inspection of potentially invalid memory regions during debugging. Use with caution.
+
+<Warning>
+  **Address Sanitizer Disabled**: The function bypasses ASan checks. Ensure the memory region is valid before calling `dump()`, or you may encounter segmentation faults.
+</Warning>
+
+## Practical Examples
+
+### Inspecting PE Headers
+
+```cpp
+#include <lbyte/stx.hpp>
+#include <fstream>
+
+using namespace lbyte::stx;
+
+std::ifstream file{"program.exe", std::ios::binary};
+if (!file) return;
+
+// Read DOS header
+u8 dos_header[64];
+file.read(reinterpret_cast<char*>(dos_header), sizeof(dos_header));
+
+println("DOS Header:");
+dump(dos_header, sizeof(dos_header));
+```
+
+### Debugging Memory Corruption
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+void debug_buffer_state(void* buffer, usize size) {
+    println("Buffer state at {:p}:", buffer);
+    dump(buffer, size);
+}
+
+// Use during debugging
+u8 buffer[256];
+process_data(buffer, sizeof(buffer));
+debug_buffer_state(buffer, sizeof(buffer));
+```
+
+### Network Packet Inspection
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+void inspect_packet(const u8* packet, usize length) {
+    println("Packet dump ({} bytes):", length);
+    dump(packet, length);
+}
+
+// Inspect received network data
+u8 recv_buffer[1024];
+usize bytes_received = recv_from_socket(recv_buffer, sizeof(recv_buffer));
+inspect_packet(recv_buffer, bytes_received);
+```
+
+### Comparing Memory Regions
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+void compare_regions(void* region1, void* region2, usize size) {
+    println("Region 1:");
+    dump(region1, size);
+    
+    println("\nRegion 2:");
+    dump(region2, size);
+}
+
+// Compare before/after modification
+u8 original[128];
+u8 modified[128];
+std::memcpy(modified, original, sizeof(original));
+modify_buffer(modified, sizeof(modified));
+
+compare_regions(original, modified, sizeof(original));
+```
+
+### Binary File Analysis
+
+```cpp
+#include <lbyte/stx.hpp>
+#include <fstream>
+#include <vector>
+
+using namespace lbyte::stx;
+
+void analyze_file_section(const char* filename, offset_t offset, usize size) {
+    std::ifstream file{filename, std::ios::binary};
+    if (!file) return;
+    
+    std::vector<u8> buffer(size);
+    file.seekg(offset.get());
+    file.read(reinterpret_cast<char*>(buffer.data()), size);
+    
+    println("File: {} at offset 0x{:x}:", filename, offset.get());
+    dump(buffer.data(), size);
+}
+
+// Analyze PE section
+analyze_file_section("app.exe", offset_t{0x1000}, 256);
+```
+
+### Shellcode Verification
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+void verify_shellcode(void* code, usize length) {
+    println("Shellcode bytes:");
+    dump(code, length);
+    
+    // Additional verification logic...
+}
+
+// Verify injected code
+u8 shellcode[] = {0x48, 0x31, 0xc0, 0x48, 0xff, 0xc0, 0xc3};
+verify_shellcode(shellcode, sizeof(shellcode));
+```
+
+## Output Redirection
+
+The function uses `std::println()` (C++23), which writes to `stdout`. Redirect output as needed:
+
+```bash
+# Save dump to file
+./program > memory_dump.txt
+
+# View with color support
+./program | less -R
+
+# Pipe to analysis tool
+./program | grep "specific pattern"
+```
+
+## Integration with Strong Types
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Dump from virtual address
+va_t module_base{0x140000000};
+dump(module_base, 512);
+
+// Dump from relative address
+rva_t section_rva{0x1000};
+void* base = get_module_base();
+dump(reinterpret_cast<u8*>(base) + section_rva.get(), 256);
+
+// Dump from file offset
+offset_t file_offset{0x400};
+u8* file_buffer = map_file_to_memory("data.bin");
+dump(file_buffer + file_offset.get(), 128);
+```
+
+## Performance Considerations
+
+- **Fast Encoding**: Manual hex encoding is faster than `std::format`
+- **Buffered Output**: Single `println()` per line minimizes I/O
+- **No Allocation**: Thread-local static buffer eliminates runtime allocation
+- **Line-by-Line**: Processing 16 bytes at a time reduces memory pressure
+
+## Comparison with Standard Tools
+
+| Tool | STX `dump()` | `xxd` | `hexdump` |
+|------|--------------|-------|------------|
+| Color support | ✓ Yes | ✗ No | ✗ No |
+| ASCII column | ✓ Yes | ✓ Yes | ✓ Yes |
+| Bytes per line | 16 | 16 (default) | 16 (default) |
+| In-process | ✓ Yes | ✗ No (external) | ✗ No (external) |
+| Type-safe | ✓ Yes | N/A | N/A |
+| C++23 | ✓ Yes | N/A | N/A |
+
+## Limitations
+
+<Warning>
+  **No Bounds Checking**: The function does not validate that the memory region `[base, base + size)` is accessible. Passing invalid addresses or sizes may cause segmentation faults.
+</Warning>
+
+| Limitation | Mitigation |
+|------------|------------|
+| No bounds checking | Validate addresses before calling |
+| No ASan protection | Use with known-valid memory only |
+| Writes to stdout | Redirect output if needed |
+| Fixed 16-byte width | Use multiple calls for different widths |
+
+## Safety Considerations
+
+```cpp
+using namespace lbyte::stx;
+
+// ✓ Safe - known valid memory
+u8 buffer[1024];
+dump(buffer, sizeof(buffer));
+
+// ✓ Safe - mapped file
+void* mapped = mmap_file("data.bin");
+if (mapped) {
+    dump(mapped, file_size);
+    munmap(mapped, file_size);
+}
+
+// ✗ Dangerous - unvalidated address
+va_t addr{0x140000000};  // May not be mapped
+// dump(addr, 1024);  // Could segfault
+
+// ✓ Better - validate first
+if (is_memory_readable(addr, 1024)) {
+    dump(addr, 1024);
+}
+```
+
+## Terminal Compatibility
+
+### Color Support
+
+The function uses ANSI escape codes for coloring:
+
+- **Supported**: Linux terminals, macOS Terminal, Windows Terminal, iTerm2, Konsole
+- **Partial**: Windows Command Prompt (Windows 10+)
+- **Unsupported**: Older Windows consoles, minimal environments
+
+### Disabling Colors
+
+Colors can be disabled by piping through `cat` or redirecting to a file:
+
+```bash
+./program | cat  # Strips ANSI codes
+./program > dump.txt  # Plain text output
+```
+
+## Best Practices
+
+1. **Validate Memory**: Always ensure the memory region is accessible before dumping
+2. **Reasonable Sizes**: Avoid dumping extremely large regions; use smaller chunks
+3. **Debug Only**: Use primarily for debugging; not suitable for production logging
+4. **Thread Safety**: Safe for concurrent use due to thread-local buffer
+5. **ASan Awareness**: Be cautious when ASan is enabled; the function bypasses checks
+
+## Future Considerations
+
+Potential enhancements:
+
+- Configurable bytes per line
+- Optional color schemes
+- Group byte output (e.g., 4-byte groups)
+- Differential highlighting
+- Endianness interpretation
+- Symbol resolution for addresses

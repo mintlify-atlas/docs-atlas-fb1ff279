@@ -1,0 +1,386 @@
+---
+title: "Strong Types"
+description: "Type-safe wrappers preventing accidental mixing of semantically distinct numeric domains"
+---
+
+# Strong Types
+
+STX provides strongly-typed wrappers for addresses and offsets to prevent accidental mixing of semantically distinct numeric domains. This eliminates entire classes of bugs at compile time while maintaining zero runtime overhead.
+
+<Note>
+Strong types use C++23 features including explicit object parameters (`this Self&&`) and three-way comparison operators (`<=>`).
+</Note>
+
+## The Problem
+
+Consider typical low-level code using raw integers:
+
+```cpp
+// All these are just numbers - easy to mix up!
+uint32_t file_offset = 0x400;
+uint32_t rva = 0x1000;
+uintptr_t virtual_address = 0x140001000;
+
+// Oops! Accidentally comparing different address spaces
+if (file_offset == rva) { /* Bug: comparing offset to RVA */ }
+
+// Oops! Wrong arithmetic
+auto result = virtual_address + rva;  // Bug: mixing VA and RVA
+```
+
+These bugs are **silent** and **dangerous** because the compiler cannot distinguish between semantically different values.
+
+## STX Strong Types
+
+STX defines three strong types for address-related values:
+
+| Type       | Underlying | Purpose                              | Domain                    |
+|-----------|------------|--------------------------------------|---------------------------|
+| `offset_t` | `usize`    | File or buffer offset                | Offsets from beginning    |
+| `rva_t`    | `u32`      | Relative Virtual Address             | Image-relative addresses  |
+| `va_t`     | `uptr`     | Absolute Virtual Address             | Process virtual addresses |
+
+### Implementation
+
+Each type is an instance of the `strong_type` template:
+
+```cpp
+namespace lbyte::stx::details
+{
+    template<typename T, typename Tag>
+    class strong_type
+    {
+        Type value{};
+    public:
+        constexpr explicit strong_type(Type v) noexcept : value{v} {}
+        
+        template<typename Self>
+        constexpr auto&& get(this Self&& self) noexcept {
+            return std::forward<Self>(self).value;
+        }
+        
+        // Arithmetic and comparison operators...
+    };
+}
+
+// Public type aliases with unique tags
+using offset_t = details::strong_type<usize, details::offset_tag>;
+using rva_t    = details::strong_type<u32,   details::rva_tag>;
+using va_t     = details::strong_type<uptr,  details::va_tag>;
+```
+
+The `Tag` parameter makes each type **completely distinct** at compile time, even if the underlying types are the same.
+
+## Construction
+
+All strong types require **explicit construction**:
+
+```cpp
+using namespace lbyte::stx;
+
+// Explicit construction from literals
+offset_t file_pos { 0x400 };
+rva_t    rva      { 0x1000 };
+va_t     base     { 0x140000000 };
+
+// Also works with variables
+u32 value = 0x2000;
+rva_t relative { value };
+
+// Generic integral construction
+offset_t off { 256u };  // From unsigned int
+offset_t off2 { 256 };  // From int (converted safely)
+```
+
+<Info>
+Implicit conversion is **forbidden** by design. This prevents accidental construction and forces explicit intent.
+</Info>
+
+### What Doesn't Compile
+
+```cpp
+// ERROR: No implicit conversion
+offset_t off = 100;  // Compilation error!
+
+// ERROR: Cannot mix types
+rva_t r1 { 100 };
+offset_t o1 = r1;    // Compilation error!
+
+// ERROR: No conversion between strong types
+va_t v { 0x1000 };
+rva_t r2 = v;        // Compilation error!
+```
+
+## Accessing the Underlying Value
+
+Two ways to extract the wrapped value:
+
+### Using `.get()`
+
+```cpp
+va_t address { 0x140001000 };
+uptr raw_value = address.get();
+```
+
+### Using Explicit Cast
+
+```cpp
+offset_t off { 512 };
+usize raw_offset = static_cast<usize>(off);
+```
+
+<Tip>
+Prefer `.get()` for clarity. Use `static_cast` when interfacing with generic code that requires explicit conversions.
+</Tip>
+
+## Arithmetic Operations
+
+Strong types support **restricted arithmetic** to maintain type safety:
+
+### Addition and Subtraction with Underlying Type
+
+You can add or subtract the underlying type to/from a strong type:
+
+```cpp
+offset_t pos { 100 };
+
+// Add underlying type
+offset_t new_pos = pos + 50;      // offset_t { 150 }
+
+// Subtract underlying type
+offset_t prev_pos = pos - 20;     // offset_t { 80 }
+
+// Chain operations
+offset_t result = pos + 100 - 25; // offset_t { 175 }
+```
+
+### Difference Between Same Types
+
+Subtracting two strong types of the **same kind** returns the underlying difference:
+
+```cpp
+offset_t a { 200 };
+offset_t b { 150 };
+
+usize diff = a - b;  // Returns usize{ 50 }
+
+rva_t r1 { 0x3000 };
+rva_t r2 { 0x1000 };
+
+u32 rva_diff = r1 - r2;  // Returns u32{ 0x2000 }
+```
+
+### What Arithmetic is Forbidden
+
+```cpp
+// ERROR: Cannot add two strong types
+offset_t a { 10 };
+offset_t b { 20 };
+auto invalid = a + b;  // Compilation error!
+
+// ERROR: Cannot mix different strong types
+offset_t off { 100 };
+rva_t rva { 0x1000 };
+auto invalid2 = off + rva;  // Compilation error!
+auto invalid3 = off - rva;  // Compilation error!
+```
+
+<Note>
+This design prevents nonsensical operations like "adding two file offsets" while allowing natural offset arithmetic like "advance position by N bytes."
+</Note>
+
+## Comparison Operations
+
+Strong types support full comparison using C++20/23 three-way comparison:
+
+```cpp
+rva_t a { 0x1000 };
+rva_t b { 0x2000 };
+
+// All comparison operators work
+if (a < b)  { /* ... */ }
+if (a <= b) { /* ... */ }
+if (a == b) { /* ... */ }
+if (a != b) { /* ... */ }
+if (a >= b) { /* ... */ }
+if (a > b)  { /* ... */ }
+
+// Three-way comparison
+auto cmp = (a <=> b);  // std::strong_ordering
+if (cmp < 0) { /* a is less than b */ }
+```
+
+### Type Safety in Comparisons
+
+```cpp
+offset_t off { 100 };
+rva_t rva { 100 };
+
+// ERROR: Cannot compare different strong types
+if (off == rva) { }  // Compilation error!
+if (off < rva)  { }  // Compilation error!
+```
+
+## Real-World Example: PE Parser
+
+```cpp
+using namespace lbyte::stx;
+
+struct pe_info
+{
+    offset_t dos_offset;     // File offset to DOS header
+    offset_t nt_offset;      // File offset to NT headers
+    rva_t    entry_point;    // RVA of entry point
+    va_t     image_base;     // Preferred load address
+};
+
+pe_info parse_pe(std::span<const u8> data)
+{
+    // Read DOS header at file offset 0
+    offset_t dos_pos { 0 };
+    auto dos = read_at<IMAGE_DOS_HEADER>(data, dos_pos);
+    
+    // NT headers at file offset specified by e_lfanew
+    offset_t nt_pos { dos.e_lfanew };  // Type-safe: u32 -> offset_t
+    auto nt = read_at<IMAGE_NT_HEADERS64>(data, nt_pos);
+    
+    // Extract strongly-typed values
+    rva_t entry_rva { nt.OptionalHeader.AddressOfEntryPoint };
+    va_t base_va { nt.OptionalHeader.ImageBase };
+    
+    return pe_info {
+        .dos_offset = dos_pos,
+        .nt_offset = nt_pos,
+        .entry_point = entry_rva,
+        .image_base = base_va
+    };
+}
+
+// Later: Convert RVA to file offset (simplified)
+offset_t rva_to_offset(rva_t rva, const section_info& section)
+{
+    // Type system prevents accidentally using VA or offset here
+    u32 rva_value = rva.get();
+    u32 section_rva = section.virtual_address.get();
+    
+    if (rva_value >= section_rva) {
+        u32 section_offset_value = rva_value - section_rva;
+        return offset_t { section.file_offset.get() + section_offset_value };
+    }
+    
+    throw std::runtime_error("RVA not in section");
+}
+```
+
+## C++23 Features in `strong_type`
+
+### Explicit Object Parameter (Deducing `this`)
+
+```cpp
+template<typename Self>
+constexpr auto&& get(this Self&& self) noexcept {
+    return std::forward<Self>(self).value;
+}
+```
+
+This C++23 feature enables perfect forwarding without writing separate const/non-const overloads:
+
+```cpp
+offset_t off { 100 };
+const offset_t const_off { 200 };
+
+usize& val1 = off.get();              // Returns usize&
+const usize& val2 = const_off.get();  // Returns const usize&
+usize val3 = offset_t{300}.get();     // Returns usize (from rvalue)
+```
+
+### Three-Way Comparison
+
+```cpp
+friend constexpr auto
+operator<=>(const strong_type&, const strong_type&) = default;
+```
+
+Generates all six comparison operators (`<`, `<=`, `==`, `!=`, `>=`, `>`) from a single defaulted spaceship operator.
+
+## Design Properties
+
+<AccordionGroup>
+  <Accordion title="Zero Overhead" icon="gauge-high">
+    `strong_type` stores only the underlying value. No vtables, no extra pointers, no runtime cost. `sizeof(offset_t) == sizeof(usize)`.
+  </Accordion>
+  
+  <Accordion title="Explicit Construction" icon="lock">
+    Prevents implicit narrowing conversions and accidental type mixing. Forces developers to explicitly state intent.
+  </Accordion>
+  
+  <Accordion title="Strong Semantic Tagging" icon="tag">
+    The `Tag` template parameter makes each instantiation a distinct type, even with identical underlying types.
+  </Accordion>
+  
+  <Accordion title="Constexpr Compatible" icon="bolt">
+    All operations are `constexpr` and can be evaluated at compile time for zero-cost abstractions.
+  </Accordion>
+</AccordionGroup>
+
+## Benefits
+
+### Compile-Time Error Detection
+
+```cpp
+offset_t file_off { 0x400 };
+rva_t rva { 0x1000 };
+
+// This bug is caught at compile time!
+if (file_off == rva) { }  // ERROR: type mismatch
+```
+
+### Self-Documenting APIs
+
+```cpp
+// Before: ambiguous
+void read_data(uint32_t address, size_t size);
+
+// After: crystal clear intent
+void read_at_offset(offset_t file_pos, usize size);
+void read_at_rva(rva_t relative_addr, usize size);
+void read_at_va(va_t virtual_addr, usize size);
+```
+
+### Refactoring Safety
+
+Changing parameter types automatically catches all incorrect call sites:
+
+```cpp
+// Change signature
+void process(offset_t off);  // Was: void process(usize off);
+
+// All call sites must now explicitly construct offset_t
+process(offset_t{100});  // OK
+process(100);            // ERROR: forces review
+```
+
+## When to Use Strong Types
+
+Use strong types when:
+- Values have **distinct semantic meanings** despite identical representations
+- **Type confusion** could lead to silent bugs
+- You're working in **multiple address spaces** (file, RVA, VA)
+- You want **self-documenting APIs**
+- You need **compile-time validation** of value domains
+
+Don't use strong types when:
+- Performance-critical inner loops where unwrapping overhead matters (though it's usually optimized away)
+- Generic numeric computations with no semantic constraints
+- Simple counters or flags without domain-specific meaning
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Type System" icon="cube" href="/concepts/type-system">
+    Learn about STX's fundamental type aliases
+  </Card>
+  <Card title="Zero Overhead" icon="gauge-high" href="/concepts/zero-overhead">
+    Understand how STX achieves zero-cost abstractions
+  </Card>
+</CardGroup>

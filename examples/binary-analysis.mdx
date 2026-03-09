@@ -1,0 +1,703 @@
+---
+title: 'Binary Analysis'
+description: 'Analyze binary files using STX file system and memory utilities'
+icon: 'magnifying-glass-chart'
+---
+
+This example demonstrates comprehensive binary file analysis using STX utilities. We'll cover entropy calculation, pattern detection, structure extraction, and statistical analysis of binary files.
+
+## Overview
+
+Binary analysis is crucial for:
+- Identifying file types and formats
+- Detecting packed or encrypted sections
+- Finding embedded resources and strings
+- Reverse engineering unknown formats
+- Security research and malware analysis
+
+<Note>
+  STX's combination of `readfs` for bulk reads and `dirty_vector` for efficient storage makes it ideal for processing large binary files.
+</Note>
+
+## Complete Binary Analyzer
+
+<Steps>
+  <Step title="Binary Statistics and Entropy">
+    Calculate entropy to detect encrypted or compressed sections:
+
+    ```cpp
+    #include <lbyte/stx.hpp>
+    #include <fstream>
+    #include <print>
+    #include <cmath>
+    #include <array>
+    #include <algorithm>
+    
+    using namespace stx;
+    
+    class BinaryAnalyzer {
+    private:
+        std::ifstream file;
+        usize file_size;
+        dirty_vector<u8> data;
+        
+    public:
+        explicit BinaryAnalyzer(const char* filepath) 
+            : file{filepath, std::ios::binary}
+        {
+            if (!file.is_open()) {
+                throw std::runtime_error("Failed to open file");
+            }
+            
+            // Get file size
+            file.seekg(0, std::ios::end);
+            file_size = file.tellg();
+            file.seekg(0, std::ios::beg);
+            
+            std::println("[+] Opened file: {} ({} bytes)", filepath, file_size);
+        }
+        
+        // Load entire file into memory
+        void load_full() {
+            std::println("[+] Loading file into memory...");
+            data = readfs<u8>(file, offset_t{0}, file_size);
+            
+            if (!last_read_ok(file)) {
+                throw std::runtime_error("Failed to read file");
+            }
+            
+            std::println("[+] Loaded {} bytes", data.size());
+        }
+        
+        // Calculate Shannon entropy for a region
+        f64 calculate_entropy(offset_t start, usize length) const {
+            std::array<usize, 256> freq{};
+            
+            // Count byte frequencies
+            usize actual_len = std::min(length, data.size() - start.get());
+            for (usize i = 0; i < actual_len; ++i) {
+                u8 byte = data[start.get() + i];
+                freq[byte]++;
+            }
+            
+            // Calculate entropy
+            f64 entropy = 0.0;
+            for (usize count : freq) {
+                if (count > 0) {
+                    f64 p = static_cast<f64>(count) / actual_len;
+                    entropy -= p * std::log2(p);
+                }
+            }
+            
+            return entropy;
+        }
+        
+        // Analyze entropy across the file
+        void analyze_entropy(usize block_size = 4096) {
+            std::println("\n[+] Entropy Analysis (block size: {} bytes):", block_size);
+            std::println("    {:<12} {:<10} {}", "Offset", "Entropy", "Assessment");
+            std::println("    {}", std::string(50, '-'));
+            
+            for (auto offset : range(
+                offset_t{0}, 
+                offset_t{data.size()},
+                block_size,
+                range_dir::Forward
+            )) {
+                f64 entropy = calculate_entropy(offset, block_size);
+                
+                std::string assessment;
+                if (entropy < 1.0) {
+                    assessment = "Very low (uniform data)";
+                } else if (entropy < 4.0) {
+                    assessment = "Low (structured data)";
+                } else if (entropy < 7.0) {
+                    assessment = "Medium (normal code/data)";
+                } else if (entropy < 7.9) {
+                    assessment = "High (compressed/encrypted)";
+                } else {
+                    assessment = "Very high (random/encrypted)";
+                }
+                
+                std::println("    0x{:08X}   {:.3f}      {}", 
+                           offset.get(), entropy, assessment);
+            }
+        }
+        
+        // Calculate byte frequency distribution
+        std::array<usize, 256> calculate_byte_distribution() const {
+            std::array<usize, 256> distribution{};
+            
+            for (const auto& byte : data) {
+                distribution[byte]++;
+            }
+            
+            return distribution;
+        }
+        
+        // Display byte distribution statistics
+        void analyze_byte_distribution() {
+            auto dist = calculate_byte_distribution();
+            
+            std::println("\n[+] Byte Distribution Analysis:");
+            
+            // Find most common bytes
+            std::vector<std::pair<u8, usize>> sorted_dist;
+            for (usize i = 0; i < 256; ++i) {
+                if (dist[i] > 0) {
+                    sorted_dist.emplace_back(static_cast<u8>(i), dist[i]);
+                }
+            }
+            
+            std::sort(sorted_dist.begin(), sorted_dist.end(),
+                [](const auto& a, const auto& b) { return a.second > b.second; });
+            
+            std::println("    Top 10 most frequent bytes:");
+            for (usize i = 0; i < std::min<usize>(10, sorted_dist.size()); ++i) {
+                auto [byte, count] = sorted_dist[i];
+                f64 percentage = (static_cast<f64>(count) / data.size()) * 100.0;
+                std::println("      0x{:02X}: {} times ({:.2f}%)", 
+                           byte, count, percentage);
+            }
+            
+            // Count null bytes
+            usize null_count = dist[0];
+            f64 null_percent = (static_cast<f64>(null_count) / data.size()) * 100.0;
+            std::println("\n    Null bytes: {} ({:.2f}%)", null_count, null_percent);
+            
+            // Count printable ASCII
+            usize printable = 0;
+            for (usize i = 32; i < 127; ++i) {
+                printable += dist[i];
+            }
+            f64 printable_percent = (static_cast<f64>(printable) / data.size()) * 100.0;
+            std::println("    Printable ASCII: {} ({:.2f}%)", 
+                       printable, printable_percent);
+        }
+    };
+    ```
+
+    <Tip>
+      High entropy (&gt;7.5) typically indicates encryption or compression. Low entropy (&lt;3.0) suggests repeated patterns or padding.
+    </Tip>
+  </Step>
+
+  <Step title="String Extraction">
+    Extract ASCII and Unicode strings from binary files:
+
+    ```cpp
+    class StringExtractor {
+    private:
+        const dirty_vector<u8>& data;
+        usize min_length;
+        
+    public:
+        StringExtractor(const dirty_vector<u8>& binary_data, usize min_len = 4)
+            : data(binary_data), min_length(min_len) {}
+        
+        struct StringMatch {
+            offset_t offset;
+            std::string value;
+            bool is_unicode;
+        };
+        
+        // Extract ASCII strings
+        std::vector<StringMatch> extract_ascii() const {
+            std::vector<StringMatch> results;
+            std::string current;
+            offset_t start_offset{0};
+            
+            for (usize i = 0; i < data.size(); ++i) {
+                u8 byte = data[i];
+                
+                // Check if printable ASCII
+                if (byte >= 32 && byte < 127) {
+                    if (current.empty()) {
+                        start_offset = offset_t{i};
+                    }
+                    current += static_cast<char>(byte);
+                } else {
+                    if (current.length() >= min_length) {
+                        results.push_back(StringMatch{
+                            start_offset,
+                            current,
+                            false
+                        });
+                    }
+                    current.clear();
+                }
+            }
+            
+            // Handle final string
+            if (current.length() >= min_length) {
+                results.push_back(StringMatch{start_offset, current, false});
+            }
+            
+            return results;
+        }
+        
+        // Extract Unicode (UTF-16 LE) strings
+        std::vector<StringMatch> extract_unicode() const {
+            std::vector<StringMatch> results;
+            std::string current;
+            offset_t start_offset{0};
+            
+            for (usize i = 0; i + 1 < data.size(); i += 2) {
+                u16 wchar = read<u16>(data.data(), offset_t{i});
+                
+                // Check if printable ASCII range in UTF-16
+                if ((wchar >= 32 && wchar < 127) || wchar == 0) {
+                    if (wchar == 0) {
+                        if (current.length() >= min_length) {
+                            results.push_back(StringMatch{
+                                start_offset,
+                                current,
+                                true
+                            });
+                        }
+                        current.clear();
+                    } else {
+                        if (current.empty()) {
+                            start_offset = offset_t{i};
+                        }
+                        current += static_cast<char>(wchar);
+                    }
+                } else {
+                    if (current.length() >= min_length) {
+                        results.push_back(StringMatch{start_offset, current, true});
+                    }
+                    current.clear();
+                }
+            }
+            
+            return results;
+        }
+        
+        // Display extracted strings
+        void display_strings(bool show_unicode = true) {
+            auto ascii_strings = extract_ascii();
+            
+            std::println("\n[+] Extracted ASCII Strings ({} found):", 
+                       ascii_strings.size());
+            
+            for (const auto& match : ascii_strings | std::views::take(50)) {
+                std::println("    0x{:08X}: {}", match.offset.get(), match.value);
+            }
+            
+            if (ascii_strings.size() > 50) {
+                std::println("    ... {} more strings", ascii_strings.size() - 50);
+            }
+            
+            if (show_unicode) {
+                auto unicode_strings = extract_unicode();
+                
+                std::println("\n[+] Extracted Unicode Strings ({} found):", 
+                           unicode_strings.size());
+                
+                for (const auto& match : unicode_strings | std::views::take(50)) {
+                    std::println("    0x{:08X}: {}", match.offset.get(), match.value);
+                }
+                
+                if (unicode_strings.size() > 50) {
+                    std::println("    ... {} more strings", unicode_strings.size() - 50);
+                }
+            }
+        }
+    };
+    ```
+  </Step>
+
+  <Step title="Pattern and Signature Detection">
+    Detect common file signatures and patterns:
+
+    ```cpp
+    class SignatureDetector {
+    private:
+        const dirty_vector<u8>& data;
+        
+        struct Signature {
+            std::string name;
+            std::vector<u8> pattern;
+            offset_t offset;
+        };
+        
+        // Common file signatures
+        static constexpr std::array<Signature, 15> SIGNATURES{{
+            {"PE Executable", {0x4D, 0x5A}, offset_t{0}},  // MZ
+            {"ELF Executable", {0x7F, 0x45, 0x4C, 0x46}, offset_t{0}},  // .ELF
+            {"Mach-O (64-bit)", {0xCF, 0xFA, 0xED, 0xFE}, offset_t{0}},
+            {"PNG Image", {0x89, 0x50, 0x4E, 0x47}, offset_t{0}},
+            {"JPEG Image", {0xFF, 0xD8, 0xFF}, offset_t{0}},
+            {"GIF Image", {0x47, 0x49, 0x46, 0x38}, offset_t{0}},
+            {"PDF Document", {0x25, 0x50, 0x44, 0x46}, offset_t{0}},
+            {"ZIP Archive", {0x50, 0x4B, 0x03, 0x04}, offset_t{0}},
+            {"RAR Archive", {0x52, 0x61, 0x72, 0x21}, offset_t{0}},
+            {"7-Zip Archive", {0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C}, offset_t{0}},
+            {"SQLite Database", {0x53, 0x51, 0x4C, 0x69, 0x74, 0x65}, offset_t{0}},
+            {"Java Class", {0xCA, 0xFE, 0xBA, 0xBE}, offset_t{0}},
+            {"WebAssembly", {0x00, 0x61, 0x73, 0x6D}, offset_t{0}},
+            {"OGG Audio", {0x4F, 0x67, 0x67, 0x53}, offset_t{0}},
+            {"FLAC Audio", {0x66, 0x4C, 0x61, 0x43}, offset_t{0}},
+        }};
+        
+    public:
+        explicit SignatureDetector(const dirty_vector<u8>& binary_data)
+            : data(binary_data) {}
+        
+        // Check for known file signatures
+        std::vector<std::string> detect_file_type() const {
+            std::vector<std::string> matches;
+            
+            for (const auto& sig : SIGNATURES) {
+                if (check_signature(sig)) {
+                    matches.push_back(sig.name);
+                }
+            }
+            
+            return matches;
+        }
+        
+        // Find all occurrences of a pattern
+        std::vector<offset_t> find_pattern(
+            const std::span<const u8> pattern
+        ) const {
+            std::vector<offset_t> results;
+            
+            if (pattern.size() > data.size()) {
+                return results;
+            }
+            
+            for (usize i = 0; i <= data.size() - pattern.size(); ++i) {
+                bool match = true;
+                
+                for (usize j = 0; j < pattern.size(); ++j) {
+                    if (data[i + j] != pattern[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+                
+                if (match) {
+                    results.push_back(offset_t{i});
+                }
+            }
+            
+            return results;
+        }
+        
+        // Display detection results
+        void display_analysis() const {
+            std::println("\n[+] File Signature Detection:");
+            
+            auto types = detect_file_type();
+            if (types.empty()) {
+                std::println("    No known signatures detected");
+            } else {
+                for (const auto& type : types) {
+                    std::println("    [+] Detected: {}", type);
+                }
+            }
+            
+            // Check for PE file specifically
+            if (check_pe_file()) {
+                analyze_pe_structure();
+            }
+        }
+        
+    private:
+        bool check_signature(const Signature& sig) const {
+            if (sig.offset.get() + sig.pattern.size() > data.size()) {
+                return false;
+            }
+            
+            for (usize i = 0; i < sig.pattern.size(); ++i) {
+                if (data[sig.offset.get() + i] != sig.pattern[i]) {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        bool check_pe_file() const {
+            if (data.size() < 64) return false;
+            
+            u16 dos_sig = read<u16>(data.data(), offset_t{0});
+            if (dos_sig != 0x5A4D) return false;  // MZ
+            
+            i32 pe_offset = read<i32>(data.data(), offset_t{0x3C});
+            if (pe_offset < 0 || static_cast<usize>(pe_offset) + 4 > data.size()) {
+                return false;
+            }
+            
+            u32 pe_sig = read<u32>(data.data(), offset_t{static_cast<usize>(pe_offset)});
+            return pe_sig == 0x4550;  // PE\0\0
+        }
+        
+        void analyze_pe_structure() const {
+            std::println("\n[+] PE File Analysis:");
+            
+            i32 pe_offset = read<i32>(data.data(), offset_t{0x3C});
+            auto pe_off = offset_t{static_cast<usize>(pe_offset)};
+            
+            // Read machine type
+            u16 machine = read<u16>(data.data(), pe_off + 4);
+            
+            std::string machine_str;
+            switch (machine) {
+                case 0x014c: machine_str = "x86 (32-bit)"; break;
+                case 0x8664: machine_str = "x64 (64-bit)"; break;
+                case 0xAA64: machine_str = "ARM64"; break;
+                case 0x01c4: machine_str = "ARM"; break;
+                default: machine_str = std::format("Unknown (0x{:04X})", machine);
+            }
+            
+            std::println("    Machine type: {}", machine_str);
+            
+            // Number of sections
+            u16 num_sections = read<u16>(data.data(), pe_off + 6);
+            std::println("    Number of sections: {}", num_sections);
+            
+            // Timestamp
+            u32 timestamp = read<u32>(data.data(), pe_off + 8);
+            std::println("    Timestamp: {} (Unix time)", timestamp);
+            
+            // Characteristics
+            u16 characteristics = read<u16>(data.data(), pe_off + 22);
+            std::println("    Characteristics: 0x{:04X}", characteristics);
+            
+            if (characteristics & 0x0002) {
+                std::println("      [+] Executable image");
+            }
+            if (characteristics & 0x2000) {
+                std::println("      [+] DLL");
+            }
+            if (characteristics & 0x0020) {
+                std::println("      [+] Large address aware");
+            }
+        }
+    };
+    ```
+
+    <Note>
+      Signature detection at file boundaries is fast and reliable for identifying file types and embedded resources.
+    </Note>
+  </Step>
+
+  <Step title="Complete Analysis Pipeline">
+    Combine all analysis tools into a comprehensive pipeline:
+
+    ```cpp
+    class ComprehensiveBinaryAnalyzer {
+    private:
+        BinaryAnalyzer analyzer;
+        
+    public:
+        explicit ComprehensiveBinaryAnalyzer(const char* filepath)
+            : analyzer(filepath) {}
+        
+        void perform_full_analysis() {
+            std::println("="*60);
+            std::println("COMPREHENSIVE BINARY ANALYSIS");
+            std::println("="*60);
+            
+            // Load file
+            analyzer.load_full();
+            
+            // Get reference to loaded data
+            const auto& data = analyzer.get_data();
+            
+            // File signature detection
+            SignatureDetector sig_detector{data};
+            sig_detector.display_analysis();
+            
+            // Entropy analysis
+            analyzer.analyze_entropy(4096);
+            
+            // Byte distribution
+            analyzer.analyze_byte_distribution();
+            
+            // String extraction
+            StringExtractor extractor{data};
+            extractor.display_strings();
+            
+            // Memory dump of file header
+            std::println("\n[+] File Header Dump (first 256 bytes):");
+            dump(data.data(), std::min<usize>(256, data.size()));
+            
+            std::println("\n" + std::string(60, '='));
+            std::println("Analysis Complete");
+        }
+    };
+    
+    auto main() -> int {
+        try {
+            ComprehensiveBinaryAnalyzer analyzer{"target.exe"};
+            analyzer.perform_full_analysis();
+            return EXIT_SUCCESS;
+            
+        } catch (const std::exception& e) {
+            std::println("Error: {}", e.what());
+            return EXIT_FAILURE;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Advanced: Section-by-Section Analysis">
+    For PE files, analyze each section individually:
+
+    ```cpp
+    void analyze_pe_sections(const char* filepath) {
+        std::ifstream file{filepath, std::ios::binary};
+        if (!file.is_open()) return;
+        
+        // Read PE headers
+        auto dos = readfs<IMAGE_DOS_HEADER>(file);
+        auto nt = readfs<IMAGE_NT_HEADERS64>(
+            file, 
+            offset_t{static_cast<usize>(dos.e_lfanew)}
+        );
+        
+        // Calculate section table offset
+        auto sections_offset = offset_t{
+            static_cast<usize>(dos.e_lfanew)
+            + sizeof(u32)
+            + sizeof(IMAGE_FILE_HEADER)
+            + nt.FileHeader.SizeOfOptionalHeader
+        };
+        
+        // Read all sections
+        auto sections = readfs<IMAGE_SECTION_HEADER>(
+            file,
+            sections_offset,
+            nt.FileHeader.NumberOfSections
+        );
+        
+        std::println("\n[+] Per-Section Analysis:");
+        std::println("    {}", std::string(70, '='));
+        
+        // Analyze each section
+        for (auto idx : range(sections.size(), range_dir::Forward)) {
+            const auto& section = sections[idx];
+            
+            std::println("\n    Section {}: {}", idx, section.get_name());
+            std::println("    {}", std::string(50, '-'));
+            
+            // Read section data
+            auto section_data = readfs<u8>(
+                file,
+                offset_t{section.PointerToRawData},
+                section.SizeOfRawData
+            );
+            
+            // Create analyzer for this section
+            BinaryAnalyzer section_analyzer{section_data};
+            
+            // Calculate section entropy
+            f64 entropy = section_analyzer.calculate_entropy(
+                offset_t{0}, 
+                section_data.size()
+            );
+            
+            std::println("      Virtual Address: 0x{:08X}", 
+                       section.VirtualAddress);
+            std::println("      Virtual Size: {} bytes", 
+                       section.VirtualSize);
+            std::println("      Raw Size: {} bytes", 
+                       section.SizeOfRawData);
+            std::println("      Entropy: {:.3f}", entropy);
+            std::println("      Characteristics: 0x{:08X}", 
+                       section.Characteristics);
+            
+            // Determine section type
+            if (section.Characteristics & 0x20000000) {
+                std::println("      Type: Executable code");
+            } else if (section.Characteristics & 0x40000000) {
+                std::println("      Type: Initialized data");
+            } else if (section.Characteristics & 0x80000000) {
+                std::println("      Type: Writable data");
+            }
+        }
+    }
+    ```
+
+    <Tip>
+      Analyzing sections individually helps identify which parts of a binary are packed, encrypted, or contain interesting data.
+    </Tip>
+  </Step>
+</Steps>
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Efficient Bulk Reads" icon="bolt">
+    Use `readfs` with `dirty_vector` for fast bulk reading without zero-initialization overhead.
+  </Card>
+  
+  <Card title="Streaming Analysis" icon="water">
+    For very large files, process in chunks rather than loading entirely into memory.
+  </Card>
+  
+  <Card title="Range Iterations" icon="arrows-rotate">
+    Use STX's `range()` with strong types for safe, efficient iteration over offsets.
+  </Card>
+  
+  <Card title="Memory Dumps" icon="display">
+    Use `dump()` for quick visual inspection - it's optimized for terminal output.
+  </Card>
+</CardGroup>
+
+## Common Analysis Patterns
+
+<AccordionGroup>
+  <Accordion title="Detecting Packed Executables">
+    Packed executables typically show:
+    - Very high entropy in code sections (>7.5)
+    - Few readable strings
+    - Small number of imports
+    - Large discrepancy between virtual and raw sizes
+    
+    ```cpp
+    bool is_likely_packed(const IMAGE_SECTION_HEADER& code_section, f64 entropy) {
+        return entropy > 7.5 && 
+               code_section.VirtualSize > code_section.SizeOfRawData * 2;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Finding Embedded Resources">
+    Look for signature patterns throughout the file:
+    ```cpp
+    // Search for embedded PE files
+    auto pe_signatures = find_pattern(data, {0x4D, 0x5A});  // MZ
+    
+    // Search for embedded archives
+    auto zip_signatures = find_pattern(data, {0x50, 0x4B, 0x03, 0x04});
+    ```
+  </Accordion>
+  
+  <Accordion title="Identifying Code vs Data">
+    Use entropy and byte distribution:
+    - Code: Entropy 5-7, varied instruction patterns
+    - Data: Entropy 3-5, structured patterns
+    - Compressed/Encrypted: Entropy &gt;7.5, uniform distribution
+    - Padding: Entropy &lt;1, single repeated byte
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="PE Parser" href="/examples/pe-parser" icon="file-binary">
+    Parse Windows executables
+  </Card>
+  
+  <Card title="Memory Patching" href="/examples/memory-patching" icon="memory">
+    Modify binary data at runtime
+  </Card>
+  
+  <Card title="File System API" href="/api/filesystem/operations" icon="book">
+    Complete reference for file operations
+  </Card>
+</CardGroup>

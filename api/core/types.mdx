@@ -1,0 +1,388 @@
+---
+title: "Fundamental Types"
+description: "Fixed-width numeric and platform-consistent type aliases for STX"
+---
+
+## Overview
+
+The STX library provides a comprehensive set of type aliases that offer fixed-width integers, floating-point types, and platform-consistent size and pointer types. These aliases improve code clarity, ensure ABI stability, and provide a consistent interface across platforms.
+
+All types are defined in the `lbyte::stx` namespace and are header-only, constexpr-friendly, and have zero runtime overhead.
+
+---
+
+## Unsigned Integer Types
+
+Fixed-width unsigned integer types for precise memory layout control.
+
+### u8
+
+```cpp
+using u8 = std::uint8_t;
+```
+
+8-bit unsigned integer type.
+
+<ParamField path="Range" type="Range">
+  0 to 255
+</ParamField>
+
+**Example:**
+```cpp
+stx::u8 byte = 0xFF;
+stx::u8 flag = 1;
+```
+
+### u16
+
+```cpp
+using u16 = std::uint16_t;
+```
+
+16-bit unsigned integer type.
+
+<ParamField path="Range" type="Range">
+  0 to 65,535
+</ParamField>
+
+**Example:**
+```cpp
+stx::u16 port = 8080;
+stx::u16 count = 1024;
+```
+
+### u32
+
+```cpp
+using u32 = std::uint32_t;
+```
+
+32-bit unsigned integer type.
+
+<ParamField path="Range" type="Range">
+  0 to 4,294,967,295
+</ParamField>
+
+**Example:**
+```cpp
+stx::u32 magic = 0x464C457F;  // ELF magic number
+stx::u32 size = 1048576;      // 1 MB
+```
+
+### u64
+
+```cpp
+using u64 = std::uint64_t;
+```
+
+64-bit unsigned integer type.
+
+<ParamField path="Range" type="Range">
+  0 to 18,446,744,073,709,551,615
+</ParamField>
+
+**Example:**
+```cpp
+stx::u64 file_size = 1ULL << 40;  // 1 TB
+stx::u64 timestamp = 1234567890123;
+```
+
+---
+
+## Signed Integer Types
+
+Fixed-width signed integer types for arithmetic operations requiring negative values.
+
+### i8
+
+```cpp
+using i8 = std::int8_t;
+```
+
+8-bit signed integer type.
+
+<ParamField path="Range" type="Range">
+  -128 to 127
+</ParamField>
+
+**Example:**
+```cpp
+stx::i8 delta = -5;
+stx::i8 temperature = -40;
+```
+
+### i16
+
+```cpp
+using i16 = std::int16_t;
+```
+
+16-bit signed integer type.
+
+<ParamField path="Range" type="Range">
+  -32,768 to 32,767
+</ParamField>
+
+**Example:**
+```cpp
+stx::i16 offset = -100;
+stx::i16 elevation = 2500;
+```
+
+### i32
+
+```cpp
+using i32 = std::int32_t;
+```
+
+32-bit signed integer type.
+
+<ParamField path="Range" type="Range">
+  -2,147,483,648 to 2,147,483,647
+</ParamField>
+
+**Example:**
+```cpp
+stx::i32 coordinate = -50000;
+stx::i32 difference = -1024;
+```
+
+### i64
+
+```cpp
+using i64 = std::int64_t;
+```
+
+64-bit signed integer type.
+
+<ParamField path="Range" type="Range">
+  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
+</ParamField>
+
+**Example:**
+```cpp
+stx::i64 large_offset = -1000000000LL;
+stx::i64 time_diff = -3600000000;
+```
+
+---
+
+## Floating-Point Types
+
+Aliases for IEEE 754 floating-point types.
+
+### f32
+
+```cpp
+using f32 = float;
+```
+
+Single-precision (32-bit) floating-point type.
+
+<ParamField path="Precision" type="string">
+  ~7 decimal digits
+</ParamField>
+
+**Example:**
+```cpp
+stx::f32 ratio = 0.75f;
+stx::f32 pi = 3.14159f;
+```
+
+### f64
+
+```cpp
+using f64 = double;
+```
+
+Double-precision (64-bit) floating-point type.
+
+<ParamField path="Precision" type="string">
+  ~15 decimal digits
+</ParamField>
+
+**Example:**
+```cpp
+stx::f64 precise_pi = 3.141592653589793;
+stx::f64 large_value = 1e308;
+```
+
+---
+
+## Size and Difference Types
+
+Platform-consistent types for sizes, offsets, and pointer arithmetic.
+
+### usize
+
+```cpp
+using usize = std::size_t;
+```
+
+Unsigned size type, represents the size of any object in bytes. Platform-dependent (32-bit on 32-bit platforms, 64-bit on 64-bit platforms).
+
+<ParamField path="Use Case" type="string">
+  Array sizes, memory allocation sizes, container sizes
+</ParamField>
+
+**Example:**
+```cpp
+stx::usize buffer_size = 4096;
+stx::usize count = array.size();
+stx::usize bytes_read = read(fd, buffer, sizeof(buffer));
+```
+
+### isize
+
+```cpp
+using isize = std::ptrdiff_t;
+```
+
+Signed size/difference type, represents the result of pointer subtraction. Platform-dependent (same size as pointers).
+
+<ParamField path="Use Case" type="string">
+  Pointer differences, signed offsets, iterator arithmetic
+</ParamField>
+
+**Example:**
+```cpp
+stx::isize offset = ptr2 - ptr1;
+stx::isize delta = -100;
+```
+
+---
+
+## Pointer-Sized Integer Types
+
+Integer types guaranteed to be the same size as pointers, suitable for storing addresses.
+
+### uptr
+
+```cpp
+using uptr = std::uintptr_t;
+```
+
+Unsigned integer type capable of storing a pointer value. Used for address arithmetic and manipulation.
+
+<ParamField path="Size" type="string">
+  Platform pointer size (32 or 64 bits)
+</ParamField>
+
+<ParamField path="Use Case" type="string">
+  Address storage, pointer arithmetic, memory mapping
+</ParamField>
+
+**Example:**
+```cpp
+int* ptr = &value;
+stx::uptr addr = reinterpret_cast<stx::uptr>(ptr);
+stx::uptr base_address = 0x140000000;
+
+// Address arithmetic
+stx::uptr aligned = (addr + 15) & ~15;  // Align to 16 bytes
+```
+
+### iptr
+
+```cpp
+using iptr = std::intptr_t;
+```
+
+Signed integer type capable of storing a pointer value. Less commonly used than `uptr`, but useful when signed arithmetic is needed.
+
+<ParamField path="Size" type="string">
+  Platform pointer size (32 or 64 bits)
+</ParamField>
+
+<ParamField path="Use Case" type="string">
+  Signed address offsets, relative addressing
+</ParamField>
+
+**Example:**
+```cpp
+stx::iptr relative_offset = target_addr - base_addr;
+if (relative_offset < 0) {
+    // Handle backward reference
+}
+```
+
+---
+
+## Complete Usage Example
+
+```cpp
+#include <lbyte/stx/core.hpp>
+
+namespace stx = lbyte::stx;
+
+// Binary file header structure
+struct FileHeader
+{
+    stx::u32  magic;        // Magic number
+    stx::u16  version;      // Format version
+    stx::u16  flags;        // Feature flags
+    stx::u64  file_size;    // Total file size
+    stx::uptr base_address; // Preferred load address
+};
+
+// Process memory region
+void process_region(void* base, stx::usize size)
+{
+    stx::uptr addr = reinterpret_cast<stx::uptr>(base);
+    stx::usize remaining = size;
+    
+    while (remaining > 0) {
+        stx::usize chunk = std::min(remaining, stx::usize{4096});
+        // Process chunk...
+        remaining -= chunk;
+        addr += chunk;
+    }
+}
+
+// Calculate aligned size
+stx::usize align_size(stx::usize size, stx::usize alignment)
+{
+    return (size + alignment - 1) & ~(alignment - 1);
+}
+```
+
+---
+
+## Design Rationale
+
+<ResponseField name="Type Safety" type="string">
+  Explicit type names prevent accidental mixing of semantically different values (e.g., u32 vs i32).
+</ResponseField>
+
+<ResponseField name="Platform Independence" type="string">
+  Fixed-width types guarantee consistent behavior across platforms, critical for binary parsing and serialization.
+</ResponseField>
+
+<ResponseField name="Readability" type="string">
+  Short, clear names (u32 instead of std::uint32_t) reduce visual noise while maintaining clarity.
+</ResponseField>
+
+<ResponseField name="ABI Stability" type="string">
+  Direct aliases to standard types ensure stable binary interfaces and interoperability.
+</ResponseField>
+
+<ResponseField name="Zero Overhead" type="string">
+  All types are simple aliases with no runtime cost or additional memory usage.
+</ResponseField>
+
+---
+
+## Best Practices
+
+1. **Use fixed-width types** when exact bit width matters (binary formats, network protocols, serialization)
+2. **Use usize/isize** for sizes, counts, and container operations
+3. **Use uptr/iptr** for address manipulation and pointer arithmetic
+4. **Avoid mixing** signed and unsigned types in arithmetic operations
+5. **Prefer explicit casts** when converting between different width types
+
+---
+
+## Related
+
+- [Strong Types](/api/core/strong-types) - Type-safe wrappers for addresses
+- [Concepts](/api/core/concepts) - Type constraints for binary operations

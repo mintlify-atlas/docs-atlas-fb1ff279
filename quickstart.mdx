@@ -1,80 +1,266 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Get started with STX in minutes
 ---
 
-## Get started in three steps
+# Quick Start
 
-Get your documentation site running locally and make your first customization.
+Get up and running with STX, the modern C++23 systems toolbelt for low-level binary analysis, memory manipulation, and security research.
 
-### Step 1: Set up your local environment
+## What is STX?
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+STX is a **header-only C++23 library** providing type-safe, zero-overhead abstractions for:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Memory Operations" icon="memory">
+    Safe, low-level memory access and alignment primitives
+  </Card>
+  <Card title="Binary I/O" icon="file-binary">
+    Type-safe file operations for binary parsing
+  </Card>
+  <Card title="Function Wrappers" icon="function">
+    Strongly-typed wrappers around memory addresses
+  </Card>
+  <Card title="Time Utilities" icon="clock">
+    UNIX time conversions and high-resolution stopwatch
+  </Card>
 </CardGroup>
 
+## Prerequisites
+
+<Warning>
+  STX requires a C++23-compliant compiler:
+  - **Clang 16+**
+  - **GCC 14+**
+  - **MSVC 19.34+**
+</Warning>
+
+For C++ Modules support, you'll also need **CMake 3.28+**.
+
+## Your First STX Program
+
+Let's create a simple program that demonstrates STX's type-safe memory operations.
+
+<Steps>
+  <Step title="Include STX">
+    Start by including the main STX header:
+
+    <CodeGroup>
+    ```cpp Traditional Headers
+    #include <lbyte/stx.hpp>
+    #include <print>
+
+    using namespace lbyte::stx;
+    ```
+
+    ```cpp C++ Modules
+    import lbyte.stx;
+    #include <print>
+
+    using namespace lbyte::stx;
+    ```
+    </CodeGroup>
+
+    <Info>
+      The library provides both traditional headers and C++23 modules. Choose the approach that fits your build system.
+    </Info>
+  </Step>
+
+  <Step title="Use Strong Types">
+    STX provides strong types for type-safe operations:
+
+    ```cpp
+    int main() {
+        // Strong types prevent accidental misuse
+        offset_t file_offset{0x1000};
+        rva_t relative_address{0x2000};
+        va_t virtual_address{0x400000};
+
+        std::println("File offset: 0x{:x}", file_offset.get());
+        std::println("RVA: 0x{:x}", relative_address.get());
+        std::println("VA: 0x{:x}", virtual_address.get());
+
+        return 0;
+    }
+    ```
+
+    <Note>
+      Strong types like `offset_t`, `rva_t`, and `va_t` provide compile-time safety and prevent mixing different address types.
+    </Note>
+  </Step>
+
+  <Step title="Memory Operations">
+    Demonstrate safe memory reading:
+
+    ```cpp
+    #include <lbyte/stx.hpp>
+    #include <print>
+    #include <array>
+
+    using namespace lbyte::stx;
+
+    int main() {
+        // Create a buffer to read from
+        std::array<u8, 16> buffer = {
+            0x48, 0x65, 0x6C, 0x6C, // "Hell"
+            0x6F, 0x20, 0x53, 0x54, // "o ST"
+            0x58, 0x21, 0x00, 0x00, // "X!"
+            0xDE, 0xAD, 0xBE, 0xEF  // 0xEFBEADDE
+        };
+
+        // Safe copy-based read (works with unaligned memory)
+        auto value = read<u32>(buffer.data(), offset_t{12});
+        std::println("Read value: 0x{:08x}", value);
+
+        // Align operations
+        auto addr = 0x1234u;
+        std::println("Original: 0x{:x}", addr);
+        std::println("Aligned up to 16: 0x{:x}", align_up(addr, 16u));
+        std::println("Aligned down to 16: 0x{:x}", align_down(addr, 16u));
+
+        return 0;
+    }
+    ```
+  </Step>
+
+  <Step title="Binary File Reading">
+    Create a complete example that reads a binary file:
+
+    ```cpp
+    #include <lbyte/stx.hpp>
+    #include <fstream>
+    #include <print>
+
+    using namespace lbyte::stx;
+
+    struct Header {
+        u32 magic;
+        u32 version;
+        u64 timestamp;
+    };
+
+    int main() {
+        std::ifstream file{"data.bin", std::ios::binary};
+        if (!file.is_open()) {
+            std::println(stderr, "Failed to open file");
+            return 1;
+        }
+
+        // Type-safe file reading
+        auto header = readfs<Header>(file);
+        std::println("Magic: 0x{:08x}", header.magic);
+        std::println("Version: {}", header.version);
+        std::println("Timestamp: {}", header.timestamp);
+
+        // Read bulk data into optimized buffer
+        auto data = readfs<u8>(file, offset_t{sizeof(Header)}, 256);
+        std::println("Read {} bytes", data.size());
+
+        return 0;
+    }
+    ```
+
+    <Info>
+      The `readfs` function provides type-safe, offset-based file reading. The `dirty_vector` return type avoids unnecessary zero-initialization for better performance.
+    </Info>
+  </Step>
+</Steps>
+
+## Complete Example: PE Section Reader
+
+Here's a real-world example from the STX documentation that demonstrates parsing a PE file:
+
+```cpp
+#include <lbyte/stx.hpp>
+#include <fstream>
+#include <print>
+
+using namespace lbyte::stx;
+
+int main() {
+    std::ifstream file{"target.dll", std::ios::binary};
+    if (!file.is_open()) return EXIT_FAILURE;
+
+    // Read DOS and NT headers
+    auto dos = readfs<IMAGE_DOS_HEADER>(file);
+    auto nt  = readfs<IMAGE_NT_HEADERS64>(file, offset_t{dos.e_lfanew});
+
+    // Calculate Section Table offset
+    auto sections_offset = offset_t{
+        dos.e_lfanew
+        + sizeof(u32)
+        + sizeof(IMAGE_FILE_HEADER)
+        + nt.FileHeader.SizeOfOptionalHeader
+    };
+
+    // Bulk read sections into optimized buffer
+    auto sections = readfs<IMAGE_SECTION_HEADER>(
+        file,
+        sections_offset,
+        nt.FileHeader.NumberOfSections
+    );
+
+    for (const auto& sec : sections) {
+        std::println("Section: {}", sec.get_name());
+    }
+
+    return EXIT_SUCCESS;
+}
+```
+
+**This example demonstrates:**
+- Type-safe file reading with `readfs`
+- Offset arithmetic using `offset_t`
+- Bulk allocation with `dirty_vector`
+- Strong-type safe iteration
+
+## Key Concepts
+
+### Strong Types
+
+STX uses strong types to prevent common errors:
+
+| Type | Purpose | Example |
+|------|---------|--------|
+| `offset_t` | File or buffer offsets | `offset_t{0x1000}` |
+| `rva_t` | Relative virtual addresses | `rva_t{0x2000}` |
+| `va_t` | Virtual addresses | `va_t{0x400000}` |
+
+### Type Aliases
+
+Convenient shorthand for common types:
+
+```cpp
+using namespace lbyte::stx;
+
+u8, u16, u32, u64    // Unsigned integers
+i8, i16, i32, i64    // Signed integers
+f32, f64              // Floating point
+usize, isize          // Size types
+uptr, iptr            // Pointer-sized integers
+```
+
+### Memory Safety
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  STX provides both **safe** and **raw** memory operations:
+  - `read<T>()` / `write<T>()`: Use `memcpy`, safe for unaligned access
+  - `read_raw<T>()` / `write_raw<T>()`: Direct dereference, requires alignment
 </Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Learn how to integrate STX into your project
+  </Card>
+  <Card title="Memory API" icon="memory" href="/api/memory/read-write">
+    Explore memory manipulation utilities
+  </Card>
+  <Card title="File System API" icon="file" href="/api/filesystem/operations">
+    Type-safe binary file operations
+  </Card>
+  <Card title="GitHub Repository" icon="github" href="https://github.com/zethcxx/stx">
+    View the source code and examples
+  </Card>
+</CardGroup>

@@ -1,0 +1,325 @@
+---
+title: 'File Operations'
+description: 'Binary file reading functions for structured data extraction'
+---
+
+## Overview
+
+The file operations API provides type-safe binary reading capabilities for `std::istream` objects. All functions enforce type safety through the `binary_readable` concept and use strongly-typed offsets.
+
+---
+
+## readfs (single object)
+
+Reads a single object from a binary stream at a specified position.
+
+```cpp
+template<binary_readable Type>
+Type readfs(
+    std::istream& file,
+    const offset_t offset = offset_t{},
+    const origin dir = origin::begin
+);
+```
+
+### Parameters
+
+<ParamField path="file" type="std::istream&" required>
+  Input stream to read from. Must be opened in binary mode.
+</ParamField>
+
+<ParamField path="offset" type="offset_t" default="offset_t{}">
+  Position to seek to before reading. Defaults to 0.
+</ParamField>
+
+<ParamField path="dir" type="origin" default="origin::begin">
+  Reference point for the offset. Can be `origin::begin`, `origin::current`, or `origin::end`.
+</ParamField>
+
+### Returns
+
+A copy of the object read from the stream.
+
+### Behavior
+
+1. Seeks to the specified position using `setposfs()`
+2. Reads `sizeof(Type)` bytes from the stream
+3. Returns the value by copy
+
+### Example
+
+```cpp
+struct FileHeader {
+    stx::u32 magic;
+    stx::u16 version;
+    stx::u16 flags;
+};
+
+static_assert(stx::binary_readable<FileHeader>);
+
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read header at file beginning
+auto header = stx::readfs<FileHeader>(file);
+
+if (header.magic == 0x12345678) {
+    std::cout << "Valid file, version: " << header.version << '\n';
+}
+
+// Read a u32 at offset 128
+auto value = stx::readfs<stx::u32>(file, stx::offset_t{128});
+```
+
+---
+
+## readfs (span buffer)
+
+Reads multiple objects directly into an existing buffer.
+
+```cpp
+template<binary_readable Type>
+void readfs(
+    std::istream& file,
+    std::span<Type> out_buffer
+);
+```
+
+### Parameters
+
+<ParamField path="file" type="std::istream&" required>
+  Input stream to read from. Must be opened in binary mode.
+</ParamField>
+
+<ParamField path="out_buffer" type="std::span<Type>" required>
+  Destination buffer. Reads `out_buffer.size() * sizeof(Type)` bytes.
+</ParamField>
+
+### Behavior
+
+Reads directly into the provided buffer from the current stream position. Does not change the stream position before reading.
+
+### Example
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read 16 u32 values into an array
+std::array<stx::u32, 16> values;
+stx::readfs(file, std::span{values});
+
+// Read into a vector
+std::vector<stx::u64> buffer(100);
+stx::readfs(file, std::span{buffer});
+```
+
+---
+
+## readfs (dynamic vector)
+
+Allocates and reads multiple objects into a `dirty_vector`.
+
+```cpp
+template<binary_readable Type = u8>
+dirty_vector<Type> readfs(
+    std::istream& file,
+    const offset_t offset,
+    const usize count,
+    const origin dir = origin::begin
+);
+```
+
+### Parameters
+
+<ParamField path="file" type="std::istream&" required>
+  Input stream to read from. Must be opened in binary mode.
+</ParamField>
+
+<ParamField path="offset" type="offset_t" required>
+  Position to seek to before reading.
+</ParamField>
+
+<ParamField path="count" type="usize" required>
+  Number of elements to read.
+</ParamField>
+
+<ParamField path="dir" type="origin" default="origin::begin">
+  Reference point for the offset. Can be `origin::begin`, `origin::current`, or `origin::end`.
+</ParamField>
+
+### Returns
+
+A `dirty_vector<Type>` containing the read data.
+
+### Behavior
+
+1. Allocates a `dirty_vector<Type>` with `count` elements
+2. Seeks to the specified position
+3. Reads `count * sizeof(Type)` bytes
+4. Returns the vector
+
+<Note>
+  `dirty_vector` uses a custom allocator that avoids unnecessary zero-initialization, making it ideal for binary buffers.
+</Note>
+
+### Example
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read 256 bytes starting at offset 0
+auto bytes = stx::readfs<>(file, stx::offset_t{0}, 256);
+
+// Read 64 u16 values starting at offset 128
+auto words = stx::readfs<stx::u16>(file, stx::offset_t{128}, 64);
+
+// Read from current position
+auto data = stx::readfs<stx::u8>(
+    file,
+    stx::offset_t{32},
+    512,
+    stx::origin::current
+);
+```
+
+---
+
+## readfs (fixed-size array)
+
+Reads a compile-time fixed number of objects into a `std::array`.
+
+```cpp
+template<binary_readable Type, usize Size>
+requires (Size > 0)
+std::array<Type, Size> readfs(
+    std::istream& file,
+    const offset_t offset,
+    const origin dir = origin::begin
+);
+```
+
+### Parameters
+
+<ParamField path="file" type="std::istream&" required>
+  Input stream to read from. Must be opened in binary mode.
+</ParamField>
+
+<ParamField path="offset" type="offset_t" required>
+  Position to seek to before reading.
+</ParamField>
+
+<ParamField path="dir" type="origin" default="origin::begin">
+  Reference point for the offset. Can be `origin::begin`, `origin::current`, or `origin::end`.
+</ParamField>
+
+### Template Parameters
+
+<ParamField path="Type" type="binary_readable" required>
+  Element type to read.
+</ParamField>
+
+<ParamField path="Size" type="usize" required>
+  Number of elements to read (must be greater than 0).
+</ParamField>
+
+### Returns
+
+A `std::array<Type, Size>` containing the read data.
+
+### Example
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+// Read exactly 64 bytes
+auto block = stx::readfs<stx::u8, 64>(file, stx::offset_t{0});
+
+// Read 8 u32 values
+auto values = stx::readfs<stx::u32, 8>(file, stx::offset_t{256});
+```
+
+---
+
+## last_read_ok
+
+Checks if the last read operation succeeded.
+
+```cpp
+bool last_read_ok(const std::istream& file) noexcept;
+```
+
+### Parameters
+
+<ParamField path="file" type="const std::istream&" required>
+  Stream to check.
+</ParamField>
+
+### Returns
+
+`true` if the stream is in a good state and not at EOF, `false` otherwise.
+
+Equivalent to: `file.good() && !file.eof()`
+
+### Example
+
+```cpp
+std::ifstream file("data.bin", std::ios::binary);
+
+auto value = stx::readfs<stx::u32>(file);
+
+if (!stx::last_read_ok(file)) {
+    std::cerr << "Failed to read value\n";
+    return;
+}
+
+// Continue processing...
+```
+
+---
+
+## Type Aliases
+
+### dirty_vector
+
+```cpp
+template<binary_readable Type = u8>
+using dirty_vector = std::vector<Type, details::vec_init_allocator<Type>>;
+```
+
+A vector type optimized for binary buffers that avoids unnecessary zero-initialization.
+
+**Characteristics:**
+- Uses custom allocator (`vec_init_allocator`)
+- Constrains element type to `binary_readable`
+- Ideal for raw binary data
+- No forced value-initialization overhead
+
+**Example:**
+
+```cpp
+stx::dirty_vector<stx::u32> buffer(100);
+// Elements are not zero-initialized
+```
+
+---
+
+## Design Notes
+
+<Warning>
+  All functions assume:
+  - The stream is opened in binary mode
+  - Sufficient file size for the requested read
+  - The caller validates stream state where required
+</Warning>
+
+The API provides:
+- **Type safety**: Enforced via `binary_readable` concept
+- **Strong typing**: Offsets use `offset_t`, not raw integers
+- **Zero overhead**: No dynamic polymorphism or hidden buffering
+- **Explicit semantics**: No automatic endianness handling
+
+The design remains low-level and explicit, suitable for:
+- Binary file parsing
+- Structured header extraction  
+- Section-based file inspection
+- Memory-mapped stream adapters
+- Low-level file analysis tooling

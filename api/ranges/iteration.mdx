@@ -1,0 +1,322 @@
+---
+title: "Range Iteration"
+description: "Constexpr-friendly integer range utilities with forward/backward iteration and strong type support"
+---
+
+## Overview
+
+The range iteration API provides a lightweight, zero-allocation facility for iterating over integer ranges with support for:
+
+- Forward and backward iteration
+- Inclusive and exclusive bounds
+- Custom step values
+- Strong type compatibility (`offset_t`, `rva_t`, etc.)
+- Compile-time evaluation (`constexpr`)
+- Sentinel-based iteration
+
+## Enumerations
+
+### `range_dir`
+
+Specifies the direction of iteration.
+
+```cpp
+enum class range_dir : u8 {
+    Forward,   // Increasing values
+    Backward   // Decreasing values
+};
+```
+
+<ParamField path="Forward" type="enumerator">
+  Iterate from lower to higher values (increment)
+</ParamField>
+
+<ParamField path="Backward" type="enumerator">
+  Iterate from higher to lower values (decrement)
+</ParamField>
+
+### `range_mode`
+
+Specifies boundary inclusion policy.
+
+```cpp
+enum class range_mode : u8 {
+    Inclusive,  // End value included in iteration
+    Exclusive   // End value excluded from iteration
+};
+```
+
+<ParamField path="Inclusive" type="enumerator">
+  The end value is included in the iteration range
+</ParamField>
+
+<ParamField path="Exclusive" type="enumerator">
+  The end value is excluded from the iteration range (default)
+</ParamField>
+
+## Functions
+
+### `range()` - Single Parameter
+
+Creates a range from 0 to the specified value.
+
+```cpp
+template<rangeable Type>
+constexpr auto range(
+    Type to,
+    range_dir dir,
+    range_mode flag = range_mode::Exclusive
+) noexcept;
+```
+
+<ParamField path="to" type="rangeable Type">
+  End value of the range
+</ParamField>
+
+<ParamField path="dir" type="range_dir">
+  Direction of iteration (`Forward` or `Backward`)
+</ParamField>
+
+<ParamField path="flag" type="range_mode" default="Exclusive">
+  Whether to include the end value in iteration
+</ParamField>
+
+<ResponseField name="return" type="range_view<Type>">
+  An iterable range object compatible with range-based for loops
+</ResponseField>
+
+### `range()` - Full Parameters
+
+Creates a range with full control over start, end, and step.
+
+```cpp
+template<rangeable Type>
+constexpr auto range(
+    Type from,
+    Type to,
+    base_type_t<Type> step,
+    range_dir dir,
+    range_mode flag = range_mode::Exclusive
+) noexcept;
+```
+
+<ParamField path="from" type="rangeable Type">
+  Start value of the range
+</ParamField>
+
+<ParamField path="to" type="rangeable Type">
+  End value of the range
+</ParamField>
+
+<ParamField path="step" type="base_type_t<Type>">
+  Step increment/decrement value (must be positive)
+</ParamField>
+
+<ParamField path="dir" type="range_dir">
+  Direction of iteration
+</ParamField>
+
+<ParamField path="flag" type="range_mode" default="Exclusive">
+  Boundary inclusion policy
+</ParamField>
+
+### `range()` - Simplified Overload
+
+Creates a range with default step of 1.
+
+```cpp
+template<rangeable Type>
+constexpr auto range(
+    Type from,
+    Type to,
+    range_dir dir,
+    range_mode flag = range_mode::Exclusive
+) noexcept;
+```
+
+### `irange()` - Inclusive Variants
+
+Convenience wrappers that default to inclusive mode.
+
+```cpp
+// Full control inclusive range
+template<rangeable Type>
+constexpr auto irange(
+    Type from,
+    Type to,
+    base_type_t<Type> step,
+    range_dir dir
+) noexcept;
+
+// Single parameter inclusive range
+template<rangeable Type>
+constexpr auto irange(
+    Type to,
+    range_dir dir
+) noexcept;
+```
+
+<Note>
+  `irange` functions are equivalent to calling `range` with `range_mode::Inclusive`.
+</Note>
+
+## Usage Examples
+
+### Forward Exclusive (0 to 9)
+
+```cpp
+for (auto i : stx::range(10, stx::range_dir::Forward))
+{
+    // Iterates: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+}
+```
+
+### Forward Inclusive (0 to 10)
+
+```cpp
+for (auto i : stx::irange(10, stx::range_dir::Forward))
+{
+    // Iterates: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+}
+```
+
+### Custom Range (5 to 15)
+
+```cpp
+for (auto i : stx::range(5, 15, stx::range_dir::Forward))
+{
+    // Iterates: 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+}
+```
+
+### Backward Iteration (10 to 1)
+
+```cpp
+for (auto i : stx::range(10, 0, stx::range_dir::Backward))
+{
+    // Iterates: 10, 9, 8, 7, 6, 5, 4, 3, 2, 1
+}
+```
+
+### Custom Step (0, 4, 8, 12, 16)
+
+```cpp
+for (auto i : stx::range(0, 20, 4, stx::range_dir::Forward))
+{
+    // Iterates: 0, 4, 8, 12, 16
+}
+```
+
+### Strong Type Iteration
+
+```cpp
+for (auto off : stx::range(
+        stx::offset_t{0},
+        stx::offset_t{64},
+        8,
+        stx::range_dir::Forward))
+{
+    // off is of type offset_t
+    // Iterates: 0, 8, 16, 24, 32, 40, 48, 56
+}
+```
+
+### Inclusive Range with Step
+
+```cpp
+for (auto i : stx::irange(0, 10, 2, stx::range_dir::Forward))
+{
+    // Iterates: 0, 2, 4, 6, 8, 10 (includes 10)
+}
+```
+
+## Termination Logic
+
+### Forward Direction
+
+| Mode | Stop Condition |
+|------|----------------|
+| Exclusive | `current >= end` |
+| Inclusive | `current > end` |
+
+### Backward Direction
+
+| Mode | Stop Condition |
+|------|----------------|
+| Exclusive | `current <= end` |
+| Inclusive | `current < end` |
+
+## Strong Type Support
+
+The range API seamlessly integrates with STX strong types:
+
+```cpp
+// Iterate over memory offsets
+for (auto offset : stx::range(
+    stx::offset_t{0},
+    stx::offset_t{256},
+    16,
+    stx::range_dir::Forward))
+{
+    // offset maintains type safety
+    read_at(offset);
+}
+
+// Iterate over RVAs
+for (auto rva : stx::range(
+    stx::rva_t{0x1000},
+    stx::rva_t{0x2000},
+    stx::range_dir::Forward))
+{
+    // rva is strongly typed
+}
+```
+
+<Note>
+  When using strong types, internal arithmetic operates on the underlying integral type, but the iterator dereference returns the proper strong type, preserving domain separation.
+</Note>
+
+## Design Characteristics
+
+- **C++23 constexpr-friendly**: Fully usable in compile-time contexts
+- **Zero allocation**: No dynamic memory allocation
+- **Sentinel-based**: Efficient iteration termination
+- **Type safe**: Works with strong types without implicit conversion
+- **Direction-aware**: Explicit control over iteration order
+- **Header-only**: No compilation or linking required
+- **Zero overhead**: Compiles to the same machine code as manual loops
+
+## Concepts
+
+### `rangeable`
+
+A type is `rangeable` if it satisfies one of:
+
+1. It is an integral type (`int`, `u32`, `size_t`, etc.)
+2. It is a strong type with:
+   - A `value_type` member type
+   - A `.get()` method returning an integral
+
+```cpp
+template<typename Type>
+concept rangeable =
+       std::integral<Type>
+    or requires(Type t) {
+        typename Type::value_type;
+        { t.get() } -> std::integral;
+    };
+```
+
+## Intended Use Cases
+
+- Iterating memory offsets
+- Traversing RVA ranges in binary analysis
+- Generating aligned index sequences
+- Walking binary structures
+- Systems-level loop constructs
+- Replacing error-prone manual integer loops
+
+## Related APIs
+
+- `strong_type` for domain-safe type wrappers
+- `offset_t`, `rva_t` for memory address types

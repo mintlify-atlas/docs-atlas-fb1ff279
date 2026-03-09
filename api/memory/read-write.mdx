@@ -1,0 +1,329 @@
+---
+title: "Memory Read & Write"
+description: "Type-safe memory access with copy-based and raw pointer operations"
+---
+
+# Memory Read & Write
+
+STX provides four fundamental functions for typed memory access: copy-based operations using `std::memcpy` for well-defined behavior, and raw pointer operations for performance-critical scenarios.
+
+## Copy-Based Read
+
+### read()
+
+Safely reads a value from memory using `std::memcpy`, providing well-defined behavior under the C++ object model.
+
+```cpp
+template<class Type, address_like Addr>
+[[nodiscard]] Type read(Addr base, offset_t off = offset_t{0}) noexcept;
+```
+
+<ParamField path="Type" type="template parameter" required>
+  The type to read. Must satisfy `std::is_trivially_copyable_v<Type>`.
+</ParamField>
+
+<ParamField path="Addr" type="template parameter" required>
+  Address-like type (satisfies `address_like` concept). Can be raw pointers, `va_t`, `rva_t`, or other address types.
+</ParamField>
+
+<ParamField path="base" type="Addr" required>
+  Base address to read from.
+</ParamField>
+
+<ParamField path="off" type="offset_t" default="offset_t{0}">
+  Offset from base address in bytes.
+</ParamField>
+
+**Returns:** Value of type `Type` read from `base + off`.
+
+### Characteristics
+
+- Uses `std::memcpy` for defined behavior
+- Safe for unaligned memory access
+- Compliant with strict aliasing rules
+- Zero runtime overhead when inlined
+- Requires trivially copyable types
+
+### When to Use
+
+| Scenario | Recommended |
+|----------|-------------|
+| Parsing binary structures | ✓ Yes |
+| Packed/unaligned memory | ✓ Yes |
+| Portable code | ✓ Yes |
+| Memory-mapped files | ✓ Yes |
+| Known-aligned buffers | Consider `read_raw()` |
+
+### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+struct Header {
+    u32 magic;
+    u16 version;
+    u16 flags;
+};
+
+va_t base{0x140000000};
+
+// Read structure from memory
+Header h = read<Header>(base, offset_t{0x100});
+
+// Read primitive type
+u32 value = read<u32>(base, offset_t{0x200});
+
+// Works with unaligned addresses
+u64 unaligned = read<u64>(reinterpret_cast<void*>(0x1001), offset_t{3});
+```
+
+## Raw Pointer Read
+
+### read_raw()
+
+Directly dereferences a pointer for maximum performance. Requires proper alignment and careful usage.
+
+```cpp
+template<class Type>
+[[nodiscard]] Type read_raw(address_like auto base,
+                            offset_t off = offset_t{0}) noexcept;
+```
+
+<ParamField path="Type" type="template parameter" required>
+  The type to read. Must satisfy `std::is_trivially_copyable_v<Type>`.
+</ParamField>
+
+<ParamField path="base" type="address_like auto" required>
+  Base address to read from.
+</ParamField>
+
+<ParamField path="off" type="offset_t" default="offset_t{0}">
+  Offset from base address in bytes.
+</ParamField>
+
+**Returns:** Value of type `Type` read from `base + off` via direct dereference.
+
+### Characteristics
+
+- Direct pointer dereference (no `memcpy`)
+- **Requires properly aligned memory**
+- May violate strict aliasing if misused
+- Maximum performance in tight loops
+- Requires trivially copyable types
+
+<Warning>
+  **Alignment Required**: Using `read_raw()` with misaligned addresses causes undefined behavior on most architectures. Use `read()` for unaligned access.
+</Warning>
+
+### When to Use
+
+| Scenario | Recommended |
+|----------|-------------|
+| Known-aligned internal buffers | ✓ Yes |
+| Performance-critical tight loops | ✓ Yes |
+| Memory-mapped files | ✗ No |
+| Arbitrary external memory | ✗ No |
+
+### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Aligned buffer
+alignof(u64) u64 buffer[1024];
+
+// Safe: buffer is properly aligned
+u64 value = read_raw<u64>(buffer, offset_t{64});
+
+// Performance-critical loop
+for (usize i = 0; i < 1000; ++i) {
+    u32 val = read_raw<u32>(buffer, offset_t{i * sizeof(u32)});
+    // process val...
+}
+```
+
+## Copy-Based Write
+
+### write()
+
+Safely writes a value to memory using `std::memcpy`, providing well-defined behavior.
+
+```cpp
+template<class Type, address_like Addr>
+void write(Addr base, offset_t off, Type value) noexcept;
+```
+
+<ParamField path="Type" type="template parameter" required>
+  The type to write. Must satisfy `std::is_trivially_copyable_v<Type>`.
+</ParamField>
+
+<ParamField path="Addr" type="template parameter" required>
+  Address-like type (satisfies `address_like` concept).
+</ParamField>
+
+<ParamField path="base" type="Addr" required>
+  Base address to write to.
+</ParamField>
+
+<ParamField path="off" type="offset_t" required>
+  Offset from base address in bytes.
+</ParamField>
+
+<ParamField path="value" type="Type" required>
+  Value to write to memory.
+</ParamField>
+
+### Characteristics
+
+- Uses `std::memcpy` for defined behavior
+- Safe for unaligned memory access
+- Portable across platforms
+- Zero runtime overhead when inlined
+- Requires trivially copyable types
+
+### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+va_t base{0x140000000};
+
+// Write primitive value
+write<u32>(base, offset_t{0x300}, 0xDEADBEEF);
+
+// Write structure
+struct Config {
+    u32 flags;
+    u32 timeout;
+};
+
+Config cfg{0x01, 5000};
+write<Config>(base, offset_t{0x400}, cfg);
+
+// Safe for unaligned addresses
+write<u64>(reinterpret_cast<void*>(0x1001), offset_t{3}, 0x123456789ABCDEF0);
+```
+
+## Raw Pointer Write
+
+### write_raw()
+
+Directly writes through a pointer for maximum performance. Requires proper alignment.
+
+```cpp
+template<class Type>
+void write_raw(address_like auto base,
+               offset_t off,
+               Type value) noexcept;
+```
+
+<ParamField path="Type" type="template parameter" required>
+  The type to write. Must satisfy `std::is_trivially_copyable_v<Type>`.
+</ParamField>
+
+<ParamField path="base" type="address_like auto" required>
+  Base address to write to.
+</ParamField>
+
+<ParamField path="off" type="offset_t" required>
+  Offset from base address in bytes.
+</ParamField>
+
+<ParamField path="value" type="Type" required>
+  Value to write to memory.
+</ParamField>
+
+### Characteristics
+
+- Direct assignment through cast pointer
+- **Requires properly aligned memory**
+- No aliasing guarantees
+- Maximum performance in controlled regions
+- Requires trivially copyable types
+
+<Warning>
+  **Alignment Required**: Using `write_raw()` with misaligned addresses causes undefined behavior. Use `write()` for unaligned access.
+</Warning>
+
+### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Aligned buffer
+alignof(u64) u64 buffer[1024];
+
+// Safe: buffer is properly aligned
+write_raw<u64>(buffer, offset_t{64}, 0xCAFEBABE);
+
+// Performance-critical loop
+for (usize i = 0; i < 1000; ++i) {
+    write_raw<u32>(buffer, offset_t{i * sizeof(u32)}, i);
+}
+```
+
+## Comparison: Copy vs. Raw
+
+| Feature | `read()` / `write()` | `read_raw()` / `write_raw()` |
+|---------|---------------------|-----------------------------|
+| Implementation | `std::memcpy` | Direct dereference |
+| Alignment requirement | None | **Must be aligned** |
+| Strict aliasing | Safe | Potential issues |
+| Unaligned access | ✓ Safe | ✗ Undefined behavior |
+| Performance | Excellent (optimized away) | Maximum |
+| Portability | High | Medium |
+| Use case | General purpose | Performance-critical |
+
+## Safety Considerations
+
+<Warning>
+  **Memory Validity**: All functions assume the caller ensures:
+  - Memory region is valid and accessible
+  - No concurrent access or race conditions
+  - Proper lifetime management
+  - No bounds checking is performed
+</Warning>
+
+| Responsibility | Owner |
+|----------------|-------|
+| Memory validity | Caller |
+| Alignment correctness | Caller (raw operations) |
+| Concurrency safety | Caller |
+| Bounds checking | Caller |
+
+## Performance Notes
+
+- Modern compilers optimize `std::memcpy` to single instructions for aligned access
+- The `STX_FORCE_INLINE` attribute ensures zero abstraction overhead
+- For small, known-aligned types, `read()` and `read_raw()` generate identical code
+- Use raw operations only when profiling shows measurable benefit
+
+## Integration with Strong Types
+
+All functions work seamlessly with STX strong types:
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Using va_t (virtual address)
+va_t virtual_addr{0x140000000};
+u32 val1 = read<u32>(virtual_addr, offset_t{0x100});
+
+// Using rva_t (relative virtual address)
+rva_t relative_addr{0x1000};
+u64 val2 = read<u64>(relative_addr, offset_t{0x50});
+
+// Using raw pointers
+void* raw_ptr = get_memory_region();
+write<u32>(raw_ptr, offset_t{0}, 0x12345678);
+```

@@ -1,0 +1,295 @@
+---
+title: "Unix Time Conversion"
+description: "Utilities for converting between Unix timestamps and std::chrono time points"
+---
+
+## Overview
+
+The Unix time conversion API provides portable utilities for working with Unix timestamps (seconds/milliseconds since epoch). All conversions are relative to the Unix epoch: **1970-01-01 00:00:00 UTC**.
+
+These utilities are designed for:
+- Parsing file formats storing Unix timestamps
+- Logging and telemetry systems
+- Binary analysis and forensics
+- Cross-platform timestamp handling
+
+## Type Aliases
+
+```cpp
+using sys_clock = std::chrono::system_clock;
+using hr_clock  = std::chrono::high_resolution_clock;
+```
+
+<ParamField path="sys_clock" type="std::chrono::system_clock">
+  Wall-clock time suitable for Unix epoch conversions
+</ParamField>
+
+<ParamField path="hr_clock" type="std::chrono::high_resolution_clock">
+  High-resolution monotonic clock for precise measurements (see [Stopwatch](/api/time/stopwatch))
+</ParamField>
+
+## Functions
+
+### Creating Time Points from Unix Timestamps
+
+#### `from_unix_seconds()`
+
+Creates a `time_point` from seconds since Unix epoch.
+
+```cpp
+[[nodiscard]] inline constexpr sys_clock::time_point
+from_unix_seconds(u64 seconds) noexcept;
+```
+
+<ParamField path="seconds" type="u64">
+  Number of seconds since 1970-01-01 00:00:00 UTC
+</ParamField>
+
+<ResponseField name="return" type="sys_clock::time_point">
+  A time point representing the specified Unix timestamp
+</ResponseField>
+
+#### `from_unix_millis()`
+
+Creates a `time_point` from milliseconds since Unix epoch.
+
+```cpp
+[[nodiscard]] inline constexpr sys_clock::time_point
+from_unix_millis(u64 millis) noexcept;
+```
+
+<ParamField path="millis" type="u64">
+  Number of milliseconds since 1970-01-01 00:00:00 UTC
+</ParamField>
+
+<ResponseField name="return" type="sys_clock::time_point">
+  A time point representing the specified Unix timestamp
+</ResponseField>
+
+### Converting Time Points to Unix Timestamps
+
+#### `to_unix_seconds()`
+
+Converts a `time_point` to seconds since Unix epoch.
+
+```cpp
+[[nodiscard]] inline constexpr u64
+to_unix_seconds(sys_clock::time_point tp) noexcept;
+```
+
+<ParamField path="tp" type="sys_clock::time_point">
+  The time point to convert
+</ParamField>
+
+<ResponseField name="return" type="u64">
+  Number of seconds since Unix epoch (truncated toward zero)
+</ResponseField>
+
+#### `to_unix_millis()`
+
+Converts a `time_point` to milliseconds since Unix epoch.
+
+```cpp
+[[nodiscard]] inline constexpr u64
+to_unix_millis(sys_clock::time_point tp) noexcept;
+```
+
+<ParamField path="tp" type="sys_clock::time_point">
+  The time point to convert
+</ParamField>
+
+<ResponseField name="return" type="u64">
+  Number of milliseconds since Unix epoch (truncated toward zero)
+</ResponseField>
+
+### Getting Current Unix Time
+
+#### `unix_seconds_now()`
+
+Returns the current time as seconds since Unix epoch.
+
+```cpp
+[[nodiscard]] inline u64
+unix_seconds_now() noexcept;
+```
+
+<ResponseField name="return" type="u64">
+  Current Unix timestamp in seconds
+</ResponseField>
+
+#### `unix_millis_now()`
+
+Returns the current time as milliseconds since Unix epoch.
+
+```cpp
+[[nodiscard]] inline u64
+unix_millis_now() noexcept;
+```
+
+<ResponseField name="return" type="u64">
+  Current Unix timestamp in milliseconds
+</ResponseField>
+
+## Usage Examples
+
+### Creating Time Points from Timestamps
+
+```cpp
+// Create time point from seconds
+stx::u64 ts = 1700000000;  // November 14, 2023
+auto tp = stx::from_unix_seconds(ts);
+
+// Create time point from milliseconds
+stx::u64 ts_ms = 1700000000000;
+auto tp_ms = stx::from_unix_millis(ts_ms);
+```
+
+### Converting Time Points to Timestamps
+
+```cpp
+auto now = stx::sys_clock::now();
+
+// Convert to seconds
+stx::u64 seconds = stx::to_unix_seconds(now);
+
+// Convert to milliseconds
+stx::u64 millis = stx::to_unix_millis(now);
+```
+
+### Getting Current Unix Time
+
+```cpp
+// Get current time in seconds
+stx::u64 current_sec = stx::unix_seconds_now();
+
+// Get current time in milliseconds
+stx::u64 current_ms = stx::unix_millis_now();
+```
+
+### Parsing Timestamps from Binary Data
+
+```cpp
+struct FileHeader {
+    stx::u64 created_at;    // Unix timestamp in seconds
+    stx::u64 modified_at;   // Unix timestamp in seconds
+};
+
+void process_header(const FileHeader& header) {
+    auto created = stx::from_unix_seconds(header.created_at);
+    auto modified = stx::from_unix_seconds(header.modified_at);
+    
+    // Use with std::chrono utilities
+    auto age = stx::sys_clock::now() - created;
+}
+```
+
+### Timestamp Arithmetic
+
+```cpp
+// Calculate timestamp for 1 hour from now
+stx::u64 now = stx::unix_seconds_now();
+stx::u64 one_hour_later = now + 3600;
+
+// Convert to time_point for std::chrono operations
+auto tp_now = stx::from_unix_seconds(now);
+auto tp_later = tp_now + std::chrono::hours{1};
+
+// Convert back to Unix timestamp
+stx::u64 later_timestamp = stx::to_unix_seconds(tp_later);
+```
+
+### Logging with Timestamps
+
+```cpp
+void log_event(const char* message) {
+    stx::u64 timestamp = stx::unix_millis_now();
+    printf("[%llu] %s\n", timestamp, message);
+}
+```
+
+### Round-Trip Conversion
+
+```cpp
+// Original timestamp
+stx::u64 original = 1700000000;
+
+// Convert to time_point and back
+auto tp = stx::from_unix_seconds(original);
+stx::u64 round_trip = stx::to_unix_seconds(tp);
+
+assert(original == round_trip);
+```
+
+## Precision and Truncation
+
+<Note>
+  All conversion functions use `std::chrono::duration_cast`, which truncates toward zero. When converting from higher precision to lower precision, fractional parts are discarded.
+</Note>
+
+```cpp
+// Milliseconds to seconds loses precision
+stx::u64 millis = 1500;  // 1.5 seconds
+auto tp = stx::from_unix_millis(millis);
+stx::u64 seconds = stx::to_unix_seconds(tp);  // = 1 (truncated)
+```
+
+## Design Characteristics
+
+| Property | Description |
+|----------|-------------|
+| UTC only | No timezone abstraction or conversion |
+| No calendar | No date formatting or parsing |
+| Header-only | No compilation or linking required |
+| Portable | Works on 32-bit and 64-bit systems |
+| constexpr | Conversion functions usable at compile-time |
+| ABI-transparent | Direct use of standard library types |
+
+## Safety Considerations
+
+<Warning>
+  These functions assume that timestamps are representable within `u64`. Very large or negative timestamps may cause overflow or incorrect results.
+  
+  - Maximum representable: ~584 billion years from epoch
+  - Minimum representable: 0 (epoch)
+  - No validation is performed on input values
+</Warning>
+
+## Common Patterns
+
+### Measuring Duration Between Events
+
+```cpp
+stx::u64 start_time = stx::unix_seconds_now();
+
+// ... perform operation ...
+
+stx::u64 end_time = stx::unix_seconds_now();
+stx::u64 duration = end_time - start_time;
+
+printf("Operation took %llu seconds\n", duration);
+```
+
+### Checking if Timestamp is Recent
+
+```cpp
+bool is_recent(stx::u64 timestamp, stx::u64 max_age_seconds) {
+    stx::u64 now = stx::unix_seconds_now();
+    return (now - timestamp) <= max_age_seconds;
+}
+```
+
+## Intended Use Cases
+
+- Parsing binary file formats with embedded timestamps
+- Network protocol timestamp handling
+- Log file timestamp generation and parsing
+- Cache expiration tracking
+- Binary analysis and forensics
+- Cross-platform timestamp serialization
+- Systems programming and tooling
+
+## Related APIs
+
+- [Stopwatch](/api/time/stopwatch) - High-resolution elapsed time measurement
+- `sys_clock` - Standard library system clock
+- `std::chrono::time_point` - Standard time point representation

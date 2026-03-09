@@ -1,0 +1,430 @@
+---
+title: "Memory Alignment"
+description: "Align values up or down to power-of-two boundaries with integral and strong types"
+---
+
+# Memory Alignment
+
+STX provides `align_up()` and `align_down()` functions for aligning values to power-of-two boundaries. Both integral types and strong types are supported, preserving type safety across operations.
+
+## Integral Type Alignment
+
+### align_up()
+
+Rounds a value up to the next multiple of the specified alignment.
+
+```cpp
+template<std::unsigned_integral T>
+[[nodiscard]] constexpr T align_up(T value, T alignment) noexcept;
+```
+
+<ParamField path="T" type="template parameter" required>
+  Unsigned integral type (`u8`, `u16`, `u32`, `u64`, `usize`, etc.).
+</ParamField>
+
+<ParamField path="value" type="T" required>
+  The value to align.
+</ParamField>
+
+<ParamField path="alignment" type="T" required>
+  Alignment boundary. **Must be a power of two**.
+</ParamField>
+
+**Returns:** The smallest value greater than or equal to `value` that is a multiple of `alignment`.
+
+#### Formula
+
+```cpp
+(value + alignment - 1) & ~(alignment - 1)
+```
+
+<Warning>
+  **Power-of-Two Required**: The `alignment` parameter must be a power of two (1, 2, 4, 8, 16, ...). Non-power-of-two values cause undefined behavior.
+</Warning>
+
+#### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Align to 16-byte boundary
+u64 addr = 123;
+u64 aligned = align_up(addr, 16u);  // Returns 128
+
+// Already aligned values remain unchanged
+u32 already_aligned = 128;
+u32 result = align_up(already_aligned, 16u);  // Returns 128
+
+// Page alignment (4KB = 4096 bytes)
+usize offset = 5000;
+usize page_aligned = align_up(offset, 4096u);  // Returns 8192
+
+// Common alignment scenarios
+u64 cache_line = align_up(50u, 64u);    // 64 (cache line alignment)
+u32 paragraph = align_up(100u, 16u);    // 112 (paragraph alignment)
+u32 dword = align_up(7u, 4u);           // 8 (DWORD alignment)
+```
+
+### align_down()
+
+Rounds a value down to the previous multiple of the specified alignment.
+
+```cpp
+template<std::unsigned_integral T>
+[[nodiscard]] constexpr T align_down(T value, T alignment) noexcept;
+```
+
+<ParamField path="T" type="template parameter" required>
+  Unsigned integral type (`u8`, `u16`, `u32`, `u64`, `usize`, etc.).
+</ParamField>
+
+<ParamField path="value" type="T" required>
+  The value to align.
+</ParamField>
+
+<ParamField path="alignment" type="T" required>
+  Alignment boundary. **Must be a power of two**.
+</ParamField>
+
+**Returns:** The largest value less than or equal to `value` that is a multiple of `alignment`.
+
+#### Formula
+
+```cpp
+value & ~(alignment - 1)
+```
+
+<Warning>
+  **Power-of-Two Required**: The `alignment` parameter must be a power of two. Non-power-of-two values cause undefined behavior.
+</Warning>
+
+#### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Align down to 16-byte boundary
+u64 addr = 123;
+u64 aligned = align_down(addr, 16u);  // Returns 112
+
+// Already aligned values remain unchanged
+u32 already_aligned = 128;
+u32 result = align_down(already_aligned, 16u);  // Returns 128
+
+// Page alignment (4KB)
+usize offset = 5000;
+usize page_aligned = align_down(offset, 4096u);  // Returns 4096
+
+// Finding page boundaries
+u64 addr_in_page = 0x140002A3C;
+u64 page_start = align_down(addr_in_page, 4096u);  // Page start address
+```
+
+## Strong Type Alignment
+
+STX provides overloads for strong types (`offset_t`, `va_t`, `rva_t`) that preserve type safety.
+
+### align_up() for Strong Types
+
+```cpp
+template<typename T, typename Tag>
+[[nodiscard]] constexpr auto align_up(
+    details::strong_type<T, Tag> st,
+    T alignment
+) noexcept;
+```
+
+<ParamField path="T" type="template parameter" required>
+  Underlying integral type.
+</ParamField>
+
+<ParamField path="Tag" type="template parameter" required>
+  Strong type tag (e.g., `offset_tag`, `va_tag`, `rva_tag`).
+</ParamField>
+
+<ParamField path="st" type="strong_type<T, Tag>" required>
+  Strong-typed value to align.
+</ParamField>
+
+<ParamField path="alignment" type="T" required>
+  Alignment boundary (underlying integral type). **Must be a power of two**.
+</ParamField>
+
+**Returns:** Strong-typed value of the same type, aligned up.
+
+#### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Align offset_t
+offset_t file_offset{123};
+offset_t aligned_offset = align_up(file_offset, 16);  // Returns offset_t{128}
+
+// Align va_t (virtual address)
+va_t virtual_addr{0x140002A3C};
+va_t page_aligned = align_up(virtual_addr, 4096);  // Page-aligned address
+
+// Align rva_t (relative virtual address)
+rva_t relative_addr{0x1234};
+rva_t section_aligned = align_up(relative_addr, 512);  // Section alignment
+
+// Type safety preserved - no domain leakage
+offset_t off{100};
+offset_t result = align_up(off, 16);  // Still offset_t, not raw u64
+```
+
+### align_down() for Strong Types
+
+```cpp
+template<typename T, typename Tag>
+[[nodiscard]] constexpr auto align_down(
+    details::strong_type<T, Tag> st,
+    T alignment
+) noexcept;
+```
+
+<ParamField path="T" type="template parameter" required>
+  Underlying integral type.
+</ParamField>
+
+<ParamField path="Tag" type="template parameter" required>
+  Strong type tag.
+</ParamField>
+
+<ParamField path="st" type="strong_type<T, Tag>" required>
+  Strong-typed value to align.
+</ParamField>
+
+<ParamField path="alignment" type="T" required>
+  Alignment boundary (underlying integral type). **Must be a power of two**.
+</ParamField>
+
+**Returns:** Strong-typed value of the same type, aligned down.
+
+#### Example
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Find section start from offset within section
+offset_t current{5234};
+offset_t section_start = align_down(current, 4096);
+
+// Find page containing virtual address
+va_t addr{0x140002A3C};
+va_t page_base = align_down(addr, 4096);  // 0x140002000
+
+// Calculate RVA to section boundary
+rva_t rva{0x12345};
+rva_t aligned_rva = align_down(rva, 512);
+```
+
+## Type Preservation
+
+Strong type overloads ensure no domain leakage:
+
+| Input Type | Output Type |
+|------------|-------------|
+| `offset_t` | `offset_t` |
+| `va_t` | `va_t` |
+| `rva_t` | `rva_t` |
+| `u32` | `u32` |
+| `u64` | `u64` |
+| `usize` | `usize` |
+
+This prevents accidental mixing of different address domains:
+
+```cpp
+using namespace lbyte::stx;
+
+// Type safety enforced
+offset_t file_off{100};
+va_t virtual_addr{0x140000000};
+
+// These maintain their types
+offset_t aligned_off = align_up(file_off, 16);     // offset_t
+va_t aligned_va = align_up(virtual_addr, 4096);    // va_t
+
+// No accidental domain mixing
+// va_t mixed = file_off + aligned_va;  // Compile error - type mismatch
+```
+
+## Common Alignment Values
+
+| Alignment | Bytes | Common Use |
+|-----------|-------|------------|
+| 2 | 2 | Word alignment |
+| 4 | 4 | DWORD alignment |
+| 8 | 8 | QWORD / pointer alignment (64-bit) |
+| 16 | 16 | Paragraph / SSE alignment |
+| 32 | 32 | AVX alignment |
+| 64 | 64 | Cache line alignment |
+| 512 | 512 | PE section alignment (typical) |
+| 4096 | 4KB | Page alignment |
+| 65536 | 64KB | Large page / section base |
+| 1048576 | 1MB | Huge page alignment |
+
+## Practical Examples
+
+### File Format Parsing
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// PE file section alignment
+offset_t raw_size{1234};
+offset_t file_aligned = align_up(raw_size, 512);  // File alignment
+
+rva_t virtual_size{5678};
+rva_t section_aligned = align_up(virtual_size, 4096);  // Section alignment
+```
+
+### Memory Allocation
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Allocate cache-line aligned memory
+usize requested_size = 100;
+usize aligned_size = align_up(requested_size, 64u);
+void* ptr = std::aligned_alloc(64, aligned_size);
+
+// Ensure pointer is properly aligned
+uptr addr = reinterpret_cast<uptr>(ptr);
+uptr check = align_down(addr, 64u);
+assert(addr == check);  // Verify alignment
+```
+
+### Address Calculation
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Find page boundaries
+va_t target_addr{0x140002A3C};
+va_t page_start = align_down(target_addr, 4096);
+va_t page_end = align_up(target_addr + 1, 4096);
+
+// Calculate padding needed
+u64 data_size = 1234;
+u64 aligned_size = align_up(data_size, 16);
+u64 padding = aligned_size - data_size;  // 14 bytes
+```
+
+### Section Table Processing
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+struct Section {
+    rva_t virtual_address;
+    u32 virtual_size;
+    offset_t file_offset;
+    u32 raw_size;
+};
+
+Section calculate_section_layout(
+    rva_t base_rva,
+    offset_t base_offset,
+    u32 data_size
+) {
+    return Section{
+        .virtual_address = align_up(base_rva, 4096),
+        .virtual_size = data_size,
+        .file_offset = align_up(base_offset, 512),
+        .raw_size = align_up(data_size, 512)
+    };
+}
+```
+
+## Constexpr Support
+
+All alignment functions are `constexpr` and can be used in compile-time contexts:
+
+```cpp
+#include <lbyte/stx.hpp>
+
+using namespace lbyte::stx;
+
+// Compile-time alignment calculations
+constexpr u64 buffer_size = 1000;
+constexpr u64 aligned_size = align_up(buffer_size, 64u);  // 1024
+
+// Use in array declarations
+alignof(64) u8 buffer[aligned_size];
+
+// Compile-time assertions
+static_assert(align_up(123u, 16u) == 128u);
+static_assert(align_down(123u, 16u) == 112u);
+static_assert(align_up(128u, 16u) == 128u);
+```
+
+## Performance Characteristics
+
+- **Compile-time**: Both functions are `constexpr` and can be evaluated at compile time
+- **Runtime**: Single bitwise operation (mask and arithmetic)
+- **Inlining**: `STX_FORCE_INLINE` ensures zero function call overhead
+- **Optimization**: Modern compilers recognize the pattern and optimize aggressively
+
+## Safety Considerations
+
+<Warning>
+  **Alignment Must Be Power of Two**: Passing non-power-of-two alignment values results in undefined behavior. Valid values: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, ...
+</Warning>
+
+### Valid Alignments
+
+```cpp
+using namespace lbyte::stx;
+
+// ✓ Valid - powers of two
+align_up(100u, 1u);
+align_up(100u, 2u);
+align_up(100u, 4u);
+align_up(100u, 8u);
+align_up(100u, 16u);
+align_up(100u, 4096u);
+
+// ✗ Invalid - undefined behavior
+align_up(100u, 3u);   // Not a power of two
+align_up(100u, 5u);   // Not a power of two
+align_up(100u, 100u); // Not a power of two
+```
+
+### Runtime Validation (Debug)
+
+```cpp
+#include <lbyte/stx.hpp>
+#include <cassert>
+#include <bit>
+
+using namespace lbyte::stx;
+
+template<typename T>
+constexpr bool is_power_of_two(T value) {
+    return value > 0 && (value & (value - 1)) == 0;
+}
+
+template<typename T>
+T safe_align_up(T value, T alignment) {
+    assert(is_power_of_two(alignment));
+    return align_up(value, alignment);
+}
+```

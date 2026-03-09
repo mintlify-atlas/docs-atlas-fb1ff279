@@ -1,0 +1,390 @@
+---
+title: Installation
+description: Install and integrate STX into your C++23 project
+---
+
+# Installation
+
+STX is a **header-only C++23 library** that can be integrated into your project using various build systems. Choose the method that best fits your workflow.
+
+## Requirements
+
+<Note>
+  **Minimum Requirements:**
+  - C++23-compliant compiler (Clang 16+, GCC 14+, or MSVC 19.34+)
+  - Standard library only (no external dependencies)
+</Note>
+
+<Warning>
+  **For C++ Modules Support:**
+  - CMake 3.28+
+  - Clang 16+ / GCC 14+ / MSVC 19.34+
+</Warning>
+
+## CMake Integration
+
+STX can be integrated using CMake in several ways. Choose the method that best fits your project structure.
+
+### Method 1: Add as Subdirectory
+
+<Steps>
+  <Step title="Add STX to your project">
+    Clone or add STX as a git submodule:
+
+    ```bash
+    git submodule add https://github.com/zethcxx/stx.git extern/stx
+    ```
+  </Step>
+
+  <Step title="Update CMakeLists.txt">
+    Add the following to your `CMakeLists.txt`:
+
+    <CodeGroup>
+    ```cmake Traditional Headers
+    # Add STX with traditional headers
+    add_subdirectory(extern/stx)
+
+    # Link to your target
+    target_link_libraries(your_target PRIVATE lbyte::stx)
+    ```
+
+    ```cmake C++ Modules
+    # Enable C++23 Modules
+    set(LBYTE_STX_USE_MODULES ON CACHE BOOL "" FORCE)
+    add_subdirectory(extern/stx)
+
+    # Link to your target
+    target_link_libraries(your_target PRIVATE lbyte::stx)
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Include in your code">
+    <CodeGroup>
+    ```cpp Traditional Headers
+    #include <lbyte/stx.hpp>
+
+    using namespace lbyte::stx;
+
+    int main() {
+        // Your code here
+        return 0;
+    }
+    ```
+
+    ```cpp C++ Modules
+    import lbyte.stx;
+
+    using namespace lbyte::stx;
+
+    int main() {
+        // Your code here
+        return 0;
+    }
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Method 2: FetchContent (Recommended)
+
+For automatic dependency management, use CMake's `FetchContent`:
+
+<Steps>
+  <Step title="Configure FetchContent">
+    Add to your `CMakeLists.txt`:
+
+    <CodeGroup>
+    ```cmake Traditional Headers
+    include(FetchContent)
+
+    FetchContent_Declare(
+        stx
+        GIT_REPOSITORY https://github.com/zethcxx/stx.git
+        GIT_TAG        v2.0.0
+    )
+
+    FetchContent_MakeAvailable(stx)
+
+    target_link_libraries(${PROJECT_NAME} PRIVATE lbyte::stx)
+    ```
+
+    ```cmake C++ Modules
+    include(FetchContent)
+
+    # Enable modules before fetching
+    set(LBYTE_STX_USE_MODULES ON CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        stx
+        GIT_REPOSITORY https://github.com/zethcxx/stx.git
+        GIT_TAG        v2.0.0
+    )
+
+    FetchContent_MakeAvailable(stx)
+
+    target_link_libraries(${PROJECT_NAME} PRIVATE lbyte::stx)
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Build your project">
+    ```bash
+    cmake -B build -S .
+    cmake --build build
+    ```
+  </Step>
+</Steps>
+
+<Info>
+  **Version Pinning:** Always specify a git tag (like `v2.0.0`) for reproducible builds. See the [releases page](https://github.com/zethcxx/stx/releases) for available versions.
+</Info>
+
+## Xmake Integration
+
+Since STX is not yet available on **xrepo**, you can use this workaround in your `xmake.lua`:
+
+<Steps>
+  <Step title="Define STX package">
+    Add the following package definition to your `xmake.lua`:
+
+    ```lua
+    package("zethcxx.stx")
+        set_kind("library", { headeronly = true })
+        set_urls("https://github.com/zethcxx/stx.git")
+
+        add_versions( "v1.0.0", "v1.0.0" )
+        add_versions( "v2.0.0", "v2.0.0" )
+
+        add_configs( "use_modules", {
+            builtin = false,
+            default = false,
+            type    = "boolean",
+            description = "Use C++ Modules"
+        })
+
+        on_install( function( package )
+            local configs = {}
+
+            if package:config( "use_modules" ) then
+                configs.use_modules = true
+            end
+
+            import("package.tools.xmake").install( package, configs )
+        end)
+
+        on_load( function( package )
+            package:add("includedirs", "include")
+
+            if package:config("use_modules") then
+                package:add("cxxmodules", "modules/stx/*.cppm")
+            end
+        end)
+
+        on_test( function (package)
+            package:check_cxxsnippets({ test = "import lbyte.stx; int main() { return 0; }"},
+                { configs = { languages = "c++23" }})
+        end)
+    package_end()
+    ```
+  </Step>
+
+  <Step title="Add dependency requirement">
+    <CodeGroup>
+    ```lua Traditional Headers
+    add_requires( "zethcxx.stx v2.0.0" )
+
+    target("your_target")
+        set_kind("binary")
+        add_files("src/*.cpp")
+        add_packages("zethcxx.stx")
+        set_languages("c++23")
+    ```
+
+    ```lua C++ Modules
+    add_requires( "zethcxx.stx v2.0.0", {
+        configs = { use_modules = true }
+    })
+
+    target("your_target")
+        set_kind("binary")
+        add_files("src/*.cpp")
+        add_packages("zethcxx.stx")
+        set_languages("c++23")
+        set_policy("build.c++.modules", true)
+        -- Uncomment if you have errors with std:
+        -- set_policy("build.c++.modules.std", false)
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Build">
+    ```bash
+    xmake
+    ```
+  </Step>
+</Steps>
+
+## Manual Installation
+
+For projects without a build system or for custom integration:
+
+<Steps>
+  <Step title="Download STX">
+    Clone the repository:
+
+    ```bash
+    git clone https://github.com/zethcxx/stx.git
+    ```
+  </Step>
+
+  <Step title="Add include path">
+    Add the `include` directory to your compiler's include path:
+
+    ```bash
+    # Using g++
+    g++ -std=c++23 -I/path/to/stx/include main.cpp -o main
+
+    # Using clang++
+    clang++ -std=c++23 -I/path/to/stx/include main.cpp -o main
+    ```
+  </Step>
+
+  <Step title="Include the header">
+    ```cpp
+    #include <lbyte/stx.hpp>
+
+    int main() {
+        using namespace lbyte::stx;
+        // Your code here
+        return 0;
+    }
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Missing Clang Resource Headers
+
+When using C++ Modules with Clang, you might encounter errors like:
+
+```
+fatal error: 'stddef.h' file not found
+fatal error: '__stddef_max_align_t.h' file not found
+```
+
+**Solution:** Export the Clang resource directory to your environment:
+
+```bash
+# For Clang 21 (adjust version as needed)
+export CPLUS_INCLUDE_PATH="/usr/lib/clang/21/include/":$CPLUS_INCLUDE_PATH
+```
+
+<Note>
+  This issue occurs when the compiler cannot locate its internal resource directory. The path may vary depending on your Clang installation.
+</Note>
+
+### CMake Version Error
+
+If you see:
+
+```
+CMake Error: CMake 3.28 or higher is required
+```
+
+**Solution:** Update CMake or disable modules:
+
+```cmake
+# Disable modules (use traditional headers)
+set(LBYTE_STX_USE_MODULES OFF)
+add_subdirectory(extern/stx)
+```
+
+### Compiler Not C++23 Compatible
+
+STX requires full C++23 support. If you encounter errors:
+
+<Warning>
+  Ensure you're using:
+  - **Clang 16+**
+  - **GCC 14+**
+  - **MSVC 19.34+**
+</Warning>
+
+Check your compiler version:
+
+```bash
+# Clang
+clang++ --version
+
+# GCC
+g++ --version
+
+# MSVC
+cl.exe
+```
+
+## Verification
+
+Verify your installation by building this simple test:
+
+```cpp test.cpp
+#include <lbyte/stx.hpp>
+#include <print>
+
+int main() {
+    using namespace lbyte::stx;
+
+    std::println("STX Version: {}.{}.{}",
+        version.major,
+        version.minor,
+        version.patch);
+
+    offset_t offset{0x1000};
+    std::println("Offset: 0x{:x}", offset.get());
+
+    return 0;
+}
+```
+
+<CodeGroup>
+```bash CMake
+cmake -B build -S .
+cmake --build build
+./build/test
+```
+
+```bash Manual
+g++ -std=c++23 -I/path/to/stx/include test.cpp -o test
+./test
+```
+
+```bash Xmake
+xmake
+xmake run
+```
+</CodeGroup>
+
+**Expected output:**
+```
+STX Version: 2.0.0
+Offset: 0x1000
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Learn the basics with hands-on examples
+  </Card>
+  <Card title="Core API" icon="code" href="/api/core/types">
+    Explore core types and concepts
+  </Card>
+  <Card title="Memory API" icon="memory" href="/api/memory/read-write">
+    Memory manipulation utilities
+  </Card>
+  <Card title="File System API" icon="file" href="/api/filesystem/operations">
+    Binary file operations
+  </Card>
+</CardGroup>

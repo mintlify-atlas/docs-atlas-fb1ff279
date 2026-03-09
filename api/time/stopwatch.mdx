@@ -1,0 +1,346 @@
+---
+title: "Stopwatch"
+description: "High-resolution stopwatch for precise elapsed time measurement"
+---
+
+## Overview
+
+The `stop_watch` class provides a lightweight, high-resolution utility for measuring elapsed time. It uses `std::chrono::high_resolution_clock` for precise timing measurements, making it ideal for performance profiling, benchmarking, and timing operations.
+
+## Class Definition
+
+```cpp
+struct stop_watch
+{
+    hr_clock::time_point start_point{ hr_clock::now() };
+
+    template<class Duration = std::chrono::milliseconds>
+    [[nodiscard]] inline u64 elapsed() const noexcept;
+
+    inline void reset() noexcept;
+};
+```
+
+## Members
+
+### `start_point`
+
+The captured start timestamp.
+
+```cpp
+hr_clock::time_point start_point{ hr_clock::now() };
+```
+
+<ParamField path="start_point" type="hr_clock::time_point">
+  Automatically initialized to the current high-resolution time at construction
+</ParamField>
+
+## Methods
+
+### `elapsed()`
+
+Returns the elapsed time since the stopwatch was started or last reset.
+
+```cpp
+template<class Duration = std::chrono::milliseconds>
+[[nodiscard]] inline u64 elapsed() const noexcept;
+```
+
+<ParamField path="Duration" type="template parameter" default="std::chrono::milliseconds">
+  The time unit for the returned value. Can be any `std::chrono::duration` type:
+  - `std::chrono::nanoseconds`
+  - `std::chrono::microseconds`
+  - `std::chrono::milliseconds` (default)
+  - `std::chrono::seconds`
+  - `std::chrono::minutes`
+  - `std::chrono::hours`
+</ParamField>
+
+<ResponseField name="return" type="u64">
+  The elapsed time in the specified duration units (truncated toward zero)
+</ResponseField>
+
+### `reset()`
+
+Resets the stopwatch by capturing the current time.
+
+```cpp
+inline void reset() noexcept;
+```
+
+<Note>
+  After calling `reset()`, subsequent calls to `elapsed()` will measure time from the reset point.
+</Note>
+
+## Usage Examples
+
+### Basic Elapsed Time Measurement
+
+```cpp
+stx::stop_watch sw;
+
+// Perform some work
+perform_computation();
+
+// Get elapsed time in milliseconds (default)
+stx::u64 elapsed_ms = sw.elapsed();
+printf("Computation took %llu ms\n", elapsed_ms);
+```
+
+### Custom Duration Units
+
+```cpp
+stx::stop_watch sw;
+
+// Measure in nanoseconds
+stx::u64 elapsed_ns = sw.elapsed<std::chrono::nanoseconds>();
+
+// Measure in microseconds
+stx::u64 elapsed_us = sw.elapsed<std::chrono::microseconds>();
+
+// Measure in seconds
+stx::u64 elapsed_sec = sw.elapsed<std::chrono::seconds>();
+```
+
+### Resetting the Stopwatch
+
+```cpp
+stx::stop_watch sw;
+
+// First operation
+operation_one();
+stx::u64 time1 = sw.elapsed();
+printf("Operation 1: %llu ms\n", time1);
+
+// Reset and measure second operation
+sw.reset();
+operation_two();
+stx::u64 time2 = sw.elapsed();
+printf("Operation 2: %llu ms\n", time2);
+```
+
+### Multiple Measurements Without Reset
+
+```cpp
+stx::stop_watch sw;
+
+step_one();
+stx::u64 after_step1 = sw.elapsed();
+printf("After step 1: %llu ms\n", after_step1);
+
+step_two();
+stx::u64 after_step2 = sw.elapsed();
+printf("After step 2: %llu ms (total)\n", after_step2);
+
+stx::u64 step2_duration = after_step2 - after_step1;
+printf("Step 2 alone: %llu ms\n", step2_duration);
+```
+
+### Benchmarking Function Performance
+
+```cpp
+template<typename Func>
+void benchmark(const char* name, Func&& func, int iterations = 1000)
+{
+    stx::stop_watch sw;
+    
+    for (int i = 0; i < iterations; ++i)
+    {
+        func();
+    }
+    
+    stx::u64 total_us = sw.elapsed<std::chrono::microseconds>();
+    double avg_us = static_cast<double>(total_us) / iterations;
+    
+    printf("%s: %.2f μs per iteration\n", name, avg_us);
+}
+
+// Usage
+benchmark("hash_function", []() {
+    compute_hash(data);
+});
+```
+
+### High-Precision Timing
+
+```cpp
+stx::stop_watch sw;
+
+critical_section();
+
+// Get nanosecond precision
+stx::u64 ns = sw.elapsed<std::chrono::nanoseconds>();
+printf("Critical section: %llu ns\n", ns);
+```
+
+### Loop Profiling
+
+```cpp
+stx::stop_watch total_timer;
+stx::u64 processing_time = 0;
+
+for (int i = 0; i < items.size(); ++i)
+{
+    stx::stop_watch item_timer;
+    
+    process_item(items[i]);
+    
+    processing_time += item_timer.elapsed<std::chrono::microseconds>();
+}
+
+stx::u64 total_time = total_timer.elapsed<std::chrono::microseconds>();
+stx::u64 overhead = total_time - processing_time;
+
+printf("Processing: %llu μs\n", processing_time);
+printf("Overhead: %llu μs\n", overhead);
+```
+
+### Timeout Detection
+
+```cpp
+bool wait_for_event(stx::u64 timeout_ms)
+{
+    stx::stop_watch sw;
+    
+    while (!event_ready())
+    {
+        if (sw.elapsed() >= timeout_ms)
+        {
+            return false;  // Timeout
+        }
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    
+    return true;  // Success
+}
+```
+
+### Conditional Timing
+
+```cpp
+void process_with_timing(bool enable_profiling)
+{
+    stx::stop_watch sw;
+    
+    perform_work();
+    
+    if (enable_profiling)
+    {
+        stx::u64 elapsed = sw.elapsed();
+        log_performance("process_with_timing", elapsed);
+    }
+}
+```
+
+## Design Characteristics
+
+| Property | Description |
+|----------|-------------|
+| Zero allocation | No dynamic memory allocation |
+| Lightweight | Single time point member |
+| High precision | Uses `high_resolution_clock` |
+| Flexible units | Template-based duration selection |
+| `noexcept` | All operations are non-throwing |
+| Thread-local | No synchronization - use separate instance per thread |
+| Header-only | No compilation or linking required |
+
+## Precision Considerations
+
+<Note>
+  The actual precision depends on the platform's implementation of `std::chrono::high_resolution_clock`. On most modern systems:
+  
+  - **Linux**: Typically nanosecond precision
+  - **Windows**: Typically ~100 nanosecond precision
+  - **macOS**: Typically nanosecond precision
+  
+  The clock is monotonic and not affected by system clock adjustments.
+</Note>
+
+## Thread Safety
+
+<Warning>
+  `stop_watch` provides **no synchronization**. Each thread should use its own instance. Sharing a `stop_watch` across threads without external synchronization leads to data races.
+</Warning>
+
+```cpp
+// Safe: Each thread has its own stopwatch
+void worker_thread()
+{
+    stx::stop_watch sw;  // Thread-local
+    do_work();
+    log_time(sw.elapsed());
+}
+
+// Unsafe: Shared stopwatch without synchronization
+stx::stop_watch shared_sw;  // DON'T DO THIS
+
+void unsafe_thread()
+{
+    shared_sw.reset();  // Data race!
+    auto t = shared_sw.elapsed();  // Data race!
+}
+```
+
+## Performance Overhead
+
+The stopwatch has minimal overhead:
+
+- **Construction**: One call to `hr_clock::now()`
+- **elapsed()**: One call to `hr_clock::now()` + subtraction + duration_cast
+- **reset()**: One call to `hr_clock::now()`
+
+Typical overhead on modern systems: 10-50 nanoseconds per operation.
+
+## Common Patterns
+
+### RAII Timing Guard
+
+```cpp
+struct TimingGuard {
+    const char* name;
+    stx::stop_watch sw;
+    
+    TimingGuard(const char* n) : name(n) {}
+    
+    ~TimingGuard() {
+        printf("%s took %llu ms\n", name, sw.elapsed());
+    }
+};
+
+void function() {
+    TimingGuard guard("function");
+    // Function body automatically timed
+}
+```
+
+### Accumulating Timing
+
+```cpp
+stx::u64 total_time = 0;
+
+for (auto& item : items) {
+    stx::stop_watch sw;
+    process(item);
+    total_time += sw.elapsed();
+}
+
+printf("Total processing time: %llu ms\n", total_time);
+```
+
+## Intended Use Cases
+
+- Performance profiling and benchmarking
+- Operation timeout detection
+- Algorithm timing comparisons
+- Critical section measurement
+- Frame time tracking in game loops
+- Network request timing
+- Database query profiling
+- Build system timing reports
+
+## Related APIs
+
+- [Unix Time Conversion](/api/time/unix-time) - Working with Unix timestamps
+- `hr_clock` - High-resolution clock type alias
+- `std::chrono::high_resolution_clock` - Underlying clock implementation

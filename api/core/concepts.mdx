@@ -1,0 +1,579 @@
+---
+title: "Concepts"
+description: "Type constraints and compile-time requirements for STX library operations"
+---
+
+## Overview
+
+STX provides C++20 concepts that define compile-time constraints for types used in binary operations and address manipulation. These concepts enable safer APIs by expressing requirements explicitly and providing clear compiler errors when constraints are violated.
+
+All concepts are defined in the `lbyte::stx` namespace and are constexpr-evaluated at compile time.
+
+---
+
+## address_like
+
+```cpp
+template<typename Type>
+concept address_like
+    =  std::is_pointer_v<Type>
+    or std::same_as<std::remove_cv_t<Type>, std::uintptr_t>
+    or std::same_as<std::remove_cv_t<Type>, std::intptr_t>
+    or std::same_as<std::remove_cvref_t<Type>, va_t>;
+```
+
+Defines types that can represent a memory address. This concept is used to constrain functions that perform address normalization or manipulation.
+
+### Requirements
+
+A type satisfies `address_like` if it is **any one** of the following:
+
+<ResponseField name="Raw Pointer" type="T*">
+  Any pointer type (e.g., `int*`, `void*`, `const char*`)
+</ResponseField>
+
+<ResponseField name="std::uintptr_t" type="unsigned integer">
+  Unsigned integer type capable of storing a pointer value (with or without cv-qualifiers)
+</ResponseField>
+
+<ResponseField name="std::intptr_t" type="signed integer">
+  Signed integer type capable of storing a pointer value (with or without cv-qualifiers)
+</ResponseField>
+
+<ResponseField name="va_t" type="strong type">
+  STX virtual address strong type (without cv-ref qualifiers)
+</ResponseField>
+
+### Satisfying Types
+
+```cpp
+// Pointer types
+static_assert(stx::address_like<int*>);
+static_assert(stx::address_like<void*>);
+static_assert(stx::address_like<const char*>);
+static_assert(stx::address_like<volatile double*>);
+
+// Integer pointer types
+static_assert(stx::address_like<std::uintptr_t>);
+static_assert(stx::address_like<std::intptr_t>);
+static_assert(stx::address_like<const std::uintptr_t>);
+static_assert(stx::address_like<stx::uptr>);  // Alias for uintptr_t
+static_assert(stx::address_like<stx::iptr>);  // Alias for intptr_t
+
+// Strong type
+static_assert(stx::address_like<stx::va_t>);
+static_assert(stx::address_like<stx::va_t&>);
+static_assert(stx::address_like<const stx::va_t&>);
+```
+
+### Non-Satisfying Types
+
+```cpp
+// Other integral types
+static_assert(!stx::address_like<int>);
+static_assert(!stx::address_like<stx::u32>);
+static_assert(!stx::address_like<stx::u64>);
+static_assert(!stx::address_like<stx::usize>);
+
+// Other strong types
+static_assert(!stx::address_like<stx::offset_t>);
+static_assert(!stx::address_like<stx::rva_t>);
+
+// Non-numeric types
+static_assert(!stx::address_like<std::string>);
+static_assert(!stx::address_like<std::vector<int>>);
+```
+
+### Usage Example
+
+```cpp
+#include <lbyte/stx/core.hpp>
+
+namespace stx = lbyte::stx;
+
+// Constrain function to accept only address-like types
+template<stx::address_like Addr>
+void print_address(Addr address)
+{
+    stx::uptr normalized = stx::normalize_addr(address);
+    std::cout << std::hex << "0x" << normalized << std::endl;
+}
+
+int main()
+{
+    int value = 42;
+    
+    // All valid - satisfy address_like
+    print_address(&value);
+    print_address(reinterpret_cast<stx::uptr>(&value));
+    print_address(stx::va_t{0x140000000});
+    
+    // Compilation errors - don't satisfy address_like:
+    // print_address(42);                    // Error: int is not address_like
+    // print_address(stx::offset_t{100});    // Error: offset_t is not address_like
+    // print_address(stx::rva_t{0x1000});    // Error: rva_t is not address_like
+}
+```
+
+### Practical Applications
+
+#### Address Normalization
+
+```cpp
+template<stx::address_like Addr>
+stx::uptr get_aligned_address(Addr base, stx::usize alignment)
+{
+    stx::uptr addr = stx::normalize_addr(base);
+    return (addr + alignment - 1) & ~(alignment - 1);
+}
+
+// Usage
+int* ptr = get_data();
+stx::uptr aligned = get_aligned_address(ptr, 16);  // 16-byte aligned
+```
+
+#### Memory Range Checking
+
+```cpp
+template<stx::address_like Addr>
+bool is_in_range(Addr address, stx::va_t base, stx::usize size)
+{
+    stx::uptr addr = stx::normalize_addr(address);
+    stx::uptr start = base.get();
+    stx::uptr end = start + size;
+    return addr >= start && addr < end;
+}
+
+// Usage
+void* buffer = allocate(4096);
+stx::va_t base{reinterpret_cast<stx::uptr>(buffer)};
+
+if (is_in_range(&some_object, base, 4096)) {
+    // Object is within buffer
+}
+```
+
+#### Generic Address Comparison
+
+```cpp
+template<stx::address_like Addr1, stx::address_like Addr2>
+stx::iptr calculate_distance(Addr1 from, Addr2 to)
+{
+    stx::uptr addr1 = stx::normalize_addr(from);
+    stx::uptr addr2 = stx::normalize_addr(to);
+    return static_cast<stx::iptr>(addr2 - addr1);
+}
+
+// Usage with mixed types
+int* ptr1 = &array[0];
+stx::va_t ptr2{reinterpret_cast<stx::uptr>(&array[10])};
+stx::iptr distance = calculate_distance(ptr1, ptr2);
+```
+
+---
+
+## binary_readable
+
+```cpp
+template<class Type>
+concept binary_readable
+    =       std::is_trivially_copyable_v<Type>
+    and     std::is_standard_layout_v<Type>
+    and not std::is_empty_v<Type>
+    and not std::is_pointer_v<Type>;
+```
+
+Defines a type that is safe for raw binary deserialization. This concept ensures types can be safely read from memory buffers, files, or network streams without undefined behavior.
+
+### Requirements
+
+A type satisfies `binary_readable` if it meets **all** of the following constraints:
+
+<ResponseField name="Trivially Copyable" type="requirement">
+  `std::is_trivially_copyable_v<Type>` - Can be copied via memcpy without invoking copy constructors or assignment operators
+</ResponseField>
+
+<ResponseField name="Standard Layout" type="requirement">
+  `std::is_standard_layout_v<Type>` - Has a predictable memory layout compatible with C structs
+</ResponseField>
+
+<ResponseField name="Not Empty" type="requirement">
+  `!std::is_empty_v<Type>` - Has at least one byte of storage (prevents reading zero-sized types)
+</ResponseField>
+
+<ResponseField name="Not a Pointer" type="requirement">
+  `!std::is_pointer_v<Type>` - Is not a raw pointer (prevents reading dangling or invalid pointers)
+</ResponseField>
+
+### Satisfying Types
+
+```cpp
+// Fundamental types
+static_assert(stx::binary_readable<stx::u8>);
+static_assert(stx::binary_readable<stx::u32>);
+static_assert(stx::binary_readable<stx::i64>);
+static_assert(stx::binary_readable<stx::f32>);
+static_assert(stx::binary_readable<stx::uptr>);
+
+// Arrays
+static_assert(stx::binary_readable<stx::u32[4]>);
+static_assert(stx::binary_readable<char[256]>);
+
+// Simple POD structures
+struct Header {
+    stx::u32 magic;
+    stx::u16 version;
+    stx::u16 flags;
+};
+static_assert(stx::binary_readable<Header>);
+
+// Structures with fundamental types
+struct Point {
+    stx::f32 x, y, z;
+};
+static_assert(stx::binary_readable<Point>);
+
+// Strong types
+static_assert(stx::binary_readable<stx::offset_t>);
+static_assert(stx::binary_readable<stx::rva_t>);
+static_assert(stx::binary_readable<stx::va_t>);
+```
+
+### Non-Satisfying Types
+
+```cpp
+// Pointers (explicitly excluded)
+static_assert(!stx::binary_readable<int*>);
+static_assert(!stx::binary_readable<void*>);
+static_assert(!stx::binary_readable<const char*>);
+
+// Empty types
+struct Empty {};
+static_assert(!stx::binary_readable<Empty>);
+
+// Types with virtual functions (not trivially copyable)
+struct Base {
+    virtual ~Base() = default;
+};
+static_assert(!stx::binary_readable<Base>);
+
+// Types with user-defined copy constructor
+struct NonTrivial {
+    NonTrivial(const NonTrivial&) { /* custom logic */ }
+    stx::u32 data;
+};
+static_assert(!stx::binary_readable<NonTrivial>);
+
+// Standard library types (generally not trivially copyable)
+static_assert(!stx::binary_readable<std::string>);
+static_assert(!stx::binary_readable<std::vector<int>>);
+static_assert(!stx::binary_readable<std::unique_ptr<int>>);
+```
+
+### Usage Example
+
+```cpp
+#include <lbyte/stx/core.hpp>
+#include <span>
+#include <cstring>
+
+namespace stx = lbyte::stx;
+
+// Safe binary reading function
+template<stx::binary_readable T>
+T read_binary(const std::byte* buffer, stx::offset_t offset)
+{
+    T result;
+    std::memcpy(&result, buffer + offset.get(), sizeof(T));
+    return result;
+}
+
+// Safe binary reading from span
+template<stx::binary_readable T>
+std::optional<T> read_from_span(std::span<const std::byte> data, stx::offset_t offset)
+{
+    if (offset.get() + sizeof(T) > data.size()) {
+        return std::nullopt;  // Out of bounds
+    }
+    
+    T result;
+    std::memcpy(&result, data.data() + offset.get(), sizeof(T));
+    return result;
+}
+
+// Example structures
+struct FileHeader {
+    stx::u32 magic;
+    stx::u32 version;
+    stx::u64 file_size;
+    stx::u32 section_count;
+};
+static_assert(stx::binary_readable<FileHeader>);
+
+struct SectionHeader {
+    char name[8];
+    stx::rva_t virtual_address;
+    stx::u32 virtual_size;
+    stx::u32 raw_offset;
+    stx::u32 raw_size;
+};
+static_assert(stx::binary_readable<SectionHeader>);
+
+// Usage
+void parse_file(const std::byte* file_data, stx::usize size)
+{
+    std::span<const std::byte> data{file_data, size};
+    
+    // Read file header
+    auto header = read_from_span<FileHeader>(data, stx::offset_t{0});
+    if (!header) {
+        return;  // File too small
+    }
+    
+    // Validate magic number
+    if (header->magic != 0x12345678) {
+        return;  // Invalid file format
+    }
+    
+    // Read section headers
+    stx::offset_t section_offset{sizeof(FileHeader)};
+    for (stx::u32 i = 0; i < header->section_count; ++i) {
+        auto section = read_from_span<SectionHeader>(data, section_offset);
+        if (!section) {
+            break;  // Unexpected end of file
+        }
+        
+        // Process section...
+        
+        section_offset = section_offset + sizeof(SectionHeader);
+    }
+}
+```
+
+### Practical Applications
+
+#### Memory-Mapped File Reading
+
+```cpp
+template<stx::binary_readable T>
+class BinaryReader
+{
+public:
+    BinaryReader(const std::byte* data, stx::usize size)
+        : data_(data), size_(size), offset_(0)
+    {}
+    
+    std::optional<T> read()
+    {
+        if (offset_.get() + sizeof(T) > size_) {
+            return std::nullopt;
+        }
+        
+        T result;
+        std::memcpy(&result, data_ + offset_.get(), sizeof(T));
+        offset_ = offset_ + sizeof(T);
+        return result;
+    }
+    
+    std::optional<T> read_at(stx::offset_t pos)
+    {
+        if (pos.get() + sizeof(T) > size_) {
+            return std::nullopt;
+        }
+        
+        T result;
+        std::memcpy(&result, data_ + pos.get(), sizeof(T));
+        return result;
+    }
+    
+    stx::offset_t tell() const { return offset_; }
+    void seek(stx::offset_t pos) { offset_ = pos; }
+    
+private:
+    const std::byte* data_;
+    stx::usize size_;
+    stx::offset_t offset_;
+};
+
+// Usage
+BinaryReader reader{file_data, file_size};
+auto magic = reader.read<stx::u32>();
+auto version = reader.read<stx::u16>();
+```
+
+#### Safe std::bit_cast Alternative
+
+```cpp
+template<stx::binary_readable To, stx::binary_readable From>
+    requires (sizeof(To) == sizeof(From))
+To safe_cast(const From& from) noexcept
+{
+    return std::bit_cast<To>(from);
+}
+
+// Usage
+stx::u32 bits = 0x3F800000;
+stx::f32 value = safe_cast<stx::f32>(bits);  // 1.0f
+```
+
+#### Array Reading
+
+```cpp
+template<stx::binary_readable T>
+std::vector<T> read_array(const std::byte* buffer, stx::offset_t offset, stx::usize count)
+{
+    std::vector<T> result;
+    result.reserve(count);
+    
+    stx::offset_t current = offset;
+    for (stx::usize i = 0; i < count; ++i) {
+        T element;
+        std::memcpy(&element, buffer + current.get(), sizeof(T));
+        result.push_back(element);
+        current = current + sizeof(T);
+    }
+    
+    return result;
+}
+
+// Usage
+auto values = read_array<stx::u32>(file_data, stx::offset_t{0x100}, 256);
+```
+
+#### Structured Binary Parsing
+
+```cpp
+template<stx::binary_readable T>
+std::span<const T> view_array(const std::byte* buffer, stx::offset_t offset, stx::usize count)
+{
+    const T* data = reinterpret_cast<const T*>(buffer + offset.get());
+    return std::span<const T>{data, count};
+}
+
+// Usage - zero-copy access
+struct Entry {
+    stx::u32 id;
+    stx::rva_t address;
+};
+static_assert(stx::binary_readable<Entry>);
+
+auto entries = view_array<Entry>(file_data, stx::offset_t{0x200}, entry_count);
+for (const Entry& entry : entries) {
+    // Process each entry without copying
+}
+```
+
+---
+
+## Related Functions
+
+### normalize_addr
+
+```cpp
+template<address_like Addr>
+[[nodiscard]]
+constexpr uptr normalize_addr(Addr base) noexcept;
+```
+
+Normalizes any `address_like` type to a uniform `uptr` representation. This function is constrained by the `address_like` concept.
+
+#### Behavior
+
+<ResponseField name="Pointer Input" type="T*">
+  Converts via `reinterpret_cast<uptr>(base)`
+</ResponseField>
+
+<ResponseField name="va_t Input" type="va_t">
+  Extracts underlying value via `base.get()` then casts to `uptr`
+</ResponseField>
+
+<ResponseField name="Integer Input" type="uintptr_t/intptr_t">
+  Converts via `static_cast<uptr>(base)`
+</ResponseField>
+
+#### Example
+
+```cpp
+int value = 42;
+
+// Different address representations
+int* ptr = &value;
+stx::uptr raw_addr = reinterpret_cast<stx::uptr>(ptr);
+stx::va_t va{raw_addr};
+
+// All normalize to the same uptr value
+stx::uptr addr1 = stx::normalize_addr(ptr);       // From pointer
+stx::uptr addr2 = stx::normalize_addr(raw_addr);  // From uintptr_t
+stx::uptr addr3 = stx::normalize_addr(va);        // From va_t
+
+assert(addr1 == addr2 && addr2 == addr3);
+```
+
+#### Compile-Time Evaluation
+
+```cpp
+constexpr stx::va_t base{0x140000000};
+constexpr stx::uptr addr = stx::normalize_addr(base);
+static_assert(addr == 0x140000000);
+```
+
+---
+
+## Design Rationale
+
+<ResponseField name="Compile-Time Validation" type="string">
+  Concepts enable clear, compile-time error messages when type requirements are not met.
+</ResponseField>
+
+<ResponseField name="Self-Documenting APIs" type="string">
+  Function signatures explicitly declare their requirements through concept constraints.
+</ResponseField>
+
+<ResponseField name="Zero Runtime Cost" type="string">
+  All concept checks are performed at compile time with no runtime overhead.
+</ResponseField>
+
+<ResponseField name="Type Safety" type="string">
+  Prevents accidental use of inappropriate types in binary operations and address manipulation.
+</ResponseField>
+
+<ResponseField name="Generic Programming" type="string">
+  Enables writing flexible, reusable code that works with multiple address representations.
+</ResponseField>
+
+---
+
+## Best Practices
+
+1. **Use concepts in function templates** to constrain acceptable types and improve error messages
+2. **Prefer binary_readable** over manual trait checks for binary parsing operations
+3. **Use address_like with normalize_addr** to support multiple address representations uniformly
+4. **Combine concepts with requires clauses** for more complex constraints
+5. **Document concept requirements** in API documentation for user-facing code
+
+### Example: Combining Concepts
+
+```cpp
+template<stx::binary_readable T, stx::address_like Addr>
+    requires (sizeof(T) <= 4096)  // Additional constraint
+std::optional<T> read_at_address(Addr address)
+{
+    stx::uptr addr = stx::normalize_addr(address);
+    
+    // Validate alignment
+    if (addr % alignof(T) != 0) {
+        return std::nullopt;
+    }
+    
+    T result;
+    std::memcpy(&result, reinterpret_cast<const void*>(addr), sizeof(T));
+    return result;
+}
+```
+
+---
+
+## Related
+
+- [Fundamental Types](/api/core/types) - Types that satisfy binary_readable
+- [Strong Types](/api/core/strong-types) - va_t satisfies address_like

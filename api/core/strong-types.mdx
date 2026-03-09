@@ -1,0 +1,615 @@
+---
+title: "Strong Types"
+description: "Type-safe wrappers for addresses and offsets in the STX library"
+---
+
+## Overview
+
+Strong types provide compile-time type safety by wrapping primitive values in distinct types that prevent accidental mixing of semantically different values. STX provides three strong types for address-related operations:
+
+- **offset_t** - File or buffer offsets
+- **rva_t** - Relative virtual addresses (PE format)
+- **va_t** - Absolute virtual addresses
+
+These types are zero-overhead abstractions implemented using C++23 features, offering full type safety without runtime cost.
+
+---
+
+## Implementation
+
+All strong types are implemented using the internal `strong_type` template:
+
+```cpp
+template<typename Type, typename Tag>
+class strong_type;
+```
+
+Each type uses a unique tag to ensure compile-time distinction:
+
+```cpp
+namespace lbyte::stx {
+    using offset_t = details::strong_type<usize, details::offset_tag>;
+    using rva_t    = details::strong_type<u32  , details::rva_tag>;
+    using va_t     = details::strong_type<uptr , details::va_tag>;
+}
+```
+
+---
+
+## offset_t
+
+```cpp
+using offset_t = details::strong_type<usize, details::offset_tag>;
+```
+
+Represents an offset within a file or buffer. The underlying type is `usize`, making it platform-appropriate for indexing memory.
+
+### Type Properties
+
+<ResponseField name="Underlying Type" type="usize">
+  Platform-dependent size (32 or 64 bits)
+</ResponseField>
+
+<ResponseField name="Semantic Meaning" type="string">
+  Offset from the beginning of a file, buffer, or data structure
+</ResponseField>
+
+<ResponseField name="Use Cases" type="string">
+  File I/O, buffer indexing, binary parsing, seek operations
+</ResponseField>
+
+### Construction
+
+```cpp
+// Explicit construction required
+stx::offset_t off1{128};
+stx::offset_t off2{0x1000};
+
+// From integral types
+stx::usize raw_offset = 256;
+stx::offset_t off3{raw_offset};
+
+// Default construction (value-initialized to 0)
+stx::offset_t off4;  // offset is 0
+```
+
+### Accessing the Value
+
+```cpp
+stx::offset_t off{1024};
+
+// Using get() method
+stx::usize raw = off.get();
+
+// Using explicit cast
+stx::usize raw2 = static_cast<stx::usize>(off);
+```
+
+### Arithmetic Operations
+
+```cpp
+stx::offset_t off{100};
+
+// Add/subtract underlying type
+off = off + 50;   // offset_t + usize → offset_t
+off = off - 30;   // offset_t - usize → offset_t
+
+// Difference between two offsets
+stx::offset_t start{0};
+stx::offset_t end{256};
+stx::usize distance = end - start;  // offset_t - offset_t → usize
+```
+
+### Comparison
+
+```cpp
+stx::offset_t off1{100};
+stx::offset_t off2{200};
+
+if (off1 < off2) {}
+if (off1 == off2) {}
+
+// Three-way comparison
+auto result = off1 <=> off2;
+```
+
+### Complete Example
+
+```cpp
+#include <lbyte/stx/core.hpp>
+
+namespace stx = lbyte::stx;
+
+class FileReader
+{
+public:
+    void seek(stx::offset_t offset, stx::origin where)
+    {
+        switch (where) {
+            case stx::origin::begin:
+                current_pos_ = offset;
+                break;
+            case stx::origin::current:
+                current_pos_ = current_pos_ + offset.get();
+                break;
+            case stx::origin::end:
+                current_pos_ = stx::offset_t{file_size_} - offset.get();
+                break;
+        }
+    }
+    
+    stx::offset_t tell() const { return current_pos_; }
+    
+private:
+    stx::offset_t current_pos_;
+    stx::usize file_size_;
+};
+```
+
+---
+
+## rva_t
+
+```cpp
+using rva_t = details::strong_type<u32, details::rva_tag>;
+```
+
+Represents a Relative Virtual Address, commonly used in PE (Portable Executable) format. RVAs are 32-bit offsets relative to the image base.
+
+### Type Properties
+
+<ResponseField name="Underlying Type" type="u32">
+  32-bit unsigned integer (always, regardless of platform)
+</ResponseField>
+
+<ResponseField name="Semantic Meaning" type="string">
+  Offset from the image base address in memory
+</ResponseField>
+
+<ResponseField name="Use Cases" type="string">
+  PE file parsing, DLL/EXE analysis, import/export tables, relocation processing
+</ResponseField>
+
+### Construction
+
+```cpp
+// Explicit construction
+stx::rva_t rva1{0x1000};
+stx::rva_t rva2{4096};
+
+// From u32
+stx::u32 raw_rva = 0x2000;
+stx::rva_t rva3{raw_rva};
+```
+
+### Accessing the Value
+
+```cpp
+stx::rva_t rva{0x1000};
+
+// Get underlying value
+stx::u32 raw = rva.get();
+
+// Explicit cast
+stx::u32 raw2 = static_cast<stx::u32>(rva);
+```
+
+### Arithmetic Operations
+
+```cpp
+stx::rva_t rva{0x1000};
+
+// Add/subtract u32
+rva = rva + 0x100;  // rva_t + u32 → rva_t
+rva = rva - 0x50;   // rva_t - u32 → rva_t
+
+// Difference between RVAs
+stx::rva_t start{0x1000};
+stx::rva_t end{0x2000};
+stx::u32 size = end - start;  // 0x1000 (4096 bytes)
+```
+
+### Comparison
+
+```cpp
+stx::rva_t rva1{0x1000};
+stx::rva_t rva2{0x2000};
+
+if (rva1 < rva2) {}
+if (rva1 == rva2) {}
+
+auto cmp = rva1 <=> rva2;
+```
+
+### Complete Example
+
+```cpp
+#include <lbyte/stx/core.hpp>
+
+namespace stx = lbyte::stx;
+
+// PE section header
+struct SectionHeader
+{
+    char name[8];
+    stx::u32 virtual_size;
+    stx::rva_t virtual_address;
+    stx::u32 raw_size;
+    stx::u32 raw_offset;
+};
+
+class PEImage
+{
+public:
+    PEImage(void* base, stx::usize size)
+        : base_(reinterpret_cast<stx::uptr>(base))
+        , size_(size)
+    {}
+    
+    // Convert RVA to file offset
+    stx::offset_t rva_to_offset(stx::rva_t rva) const
+    {
+        for (const auto& section : sections_) {
+            stx::rva_t section_start = section.virtual_address;
+            stx::rva_t section_end = section_start + section.virtual_size;
+            
+            if (rva >= section_start && rva < section_end) {
+                stx::u32 offset_in_section = rva - section_start;
+                return stx::offset_t{section.raw_offset + offset_in_section};
+            }
+        }
+        return stx::offset_t{0};
+    }
+    
+    // Get pointer from RVA
+    void* rva_to_ptr(stx::rva_t rva) const
+    {
+        return reinterpret_cast<void*>(base_ + rva.get());
+    }
+    
+private:
+    stx::uptr base_;
+    stx::usize size_;
+    std::vector<SectionHeader> sections_;
+};
+```
+
+---
+
+## va_t
+
+```cpp
+using va_t = details::strong_type<uptr, details::va_tag>;
+```
+
+Represents an absolute Virtual Address in memory. The underlying type is `uptr`, making it platform-appropriate for storing memory addresses.
+
+### Type Properties
+
+<ResponseField name="Underlying Type" type="uptr">
+  Platform pointer size (32 or 64 bits)
+</ResponseField>
+
+<ResponseField name="Semantic Meaning" type="string">
+  Absolute virtual memory address
+</ResponseField>
+
+<ResponseField name="Use Cases" type="string">
+  Memory inspection, debugging tools, memory mapping, address translation
+</ResponseField>
+
+### Construction
+
+```cpp
+// Explicit construction
+stx::va_t va1{0x140000000};
+stx::va_t va2{reinterpret_cast<stx::uptr>(&some_var)};
+
+// From uptr
+stx::uptr raw_addr = 0x7fff0000;
+stx::va_t va3{raw_addr};
+```
+
+### Accessing the Value
+
+```cpp
+stx::va_t va{0x140000000};
+
+// Get underlying value
+stx::uptr addr = va.get();
+
+// Explicit cast
+stx::uptr addr2 = static_cast<stx::uptr>(va);
+
+// Convert to pointer
+void* ptr = reinterpret_cast<void*>(va.get());
+```
+
+### Arithmetic Operations
+
+```cpp
+stx::va_t va{0x140000000};
+
+// Add/subtract uptr
+va = va + 0x1000;  // va_t + uptr → va_t
+va = va - 0x100;   // va_t - uptr → va_t
+
+// Difference between addresses
+stx::va_t start{0x140000000};
+stx::va_t end{0x140001000};
+stx::uptr distance = end - start;  // 0x1000 (4096 bytes)
+```
+
+### Comparison
+
+```cpp
+stx::va_t va1{0x140000000};
+stx::va_t va2{0x140001000};
+
+if (va1 < va2) {}
+if (va1 == va2) {}
+
+auto cmp = va1 <=> va2;
+```
+
+### Integration with address_like Concept
+
+`va_t` satisfies the `address_like` concept and can be used with address normalization:
+
+```cpp
+stx::va_t va{0x140000000};
+stx::uptr normalized = stx::normalize_addr(va);  // Extracts via .get()
+```
+
+### Complete Example
+
+```cpp
+#include <lbyte/stx/core.hpp>
+
+namespace stx = lbyte::stx;
+
+class ProcessMemory
+{
+public:
+    ProcessMemory(stx::va_t base, stx::usize size)
+        : base_address_(base)
+        , size_(size)
+    {}
+    
+    // Check if address is in range
+    bool contains(stx::va_t address) const
+    {
+        stx::va_t end = base_address_ + size_.get();
+        return address >= base_address_ && address < end;
+    }
+    
+    // Calculate offset from base
+    stx::offset_t get_offset(stx::va_t address) const
+    {
+        if (!contains(address)) {
+            return stx::offset_t{0};
+        }
+        return stx::offset_t{address - base_address_};
+    }
+    
+    // Get absolute address from offset
+    stx::va_t get_address(stx::offset_t offset) const
+    {
+        return base_address_ + offset.get();
+    }
+    
+    template<typename T>
+    T* get_pointer(stx::va_t address) const
+    {
+        if (!contains(address)) {
+            return nullptr;
+        }
+        return reinterpret_cast<T*>(address.get());
+    }
+    
+private:
+    stx::va_t base_address_;
+    stx::usize size_;
+};
+```
+
+---
+
+## Strong Type Interface
+
+All strong types share the same interface provided by the `strong_type` template.
+
+### Member Types
+
+<ResponseField name="value_type" type="Type">
+  The underlying wrapped type (usize, u32, or uptr)
+</ResponseField>
+
+<ResponseField name="tag_type" type="Tag">
+  The unique tag type ensuring compile-time distinction
+</ResponseField>
+
+### Constructors
+
+```cpp
+// Default constructor (value-initialized to 0)
+constexpr strong_type() noexcept = default;
+
+// Explicit construction from underlying type
+constexpr explicit strong_type(value_type value) noexcept;
+
+// Explicit construction from any integral type
+template<std::integral U>
+constexpr explicit strong_type(U value) noexcept;
+```
+
+### Member Functions
+
+#### get()
+
+```cpp
+template<typename Self>
+constexpr auto&& get(this Self&& self) noexcept;
+```
+
+Returns the underlying value. Uses C++23 explicit object parameter for perfect forwarding.
+
+**Returns:** Reference to underlying value (lvalue or rvalue depending on `Self`)
+
+**Example:**
+```cpp
+stx::offset_t off{100};
+stx::usize value = off.get();          // Returns usize
+
+const stx::offset_t coff{200};
+stx::usize cvalue = coff.get();        // Works with const
+
+auto&& ref = std::move(off).get();     // Can be used with rvalues
+```
+
+#### explicit operator Type()
+
+```cpp
+template<typename Self>
+constexpr explicit operator Type(this Self&& self) noexcept;
+```
+
+Explicit conversion operator to underlying type.
+
+**Example:**
+```cpp
+stx::rva_t rva{0x1000};
+stx::u32 value = static_cast<stx::u32>(rva);
+```
+
+### Operators
+
+#### Addition with underlying type
+
+```cpp
+friend constexpr strong_type operator+(strong_type lhs, Type rhs) noexcept;
+```
+
+Adds an underlying type value to the strong type.
+
+**Returns:** New strong_type instance
+
+#### Subtraction with underlying type
+
+```cpp
+friend constexpr strong_type operator-(strong_type lhs, Type rhs) noexcept;
+```
+
+Subtracts an underlying type value from the strong type.
+
+**Returns:** New strong_type instance
+
+#### Difference between strong types
+
+```cpp
+friend constexpr Type operator-(strong_type lhs, strong_type rhs) noexcept;
+```
+
+Calculates the difference between two strong type instances.
+
+**Returns:** Underlying type value (not a strong type)
+
+#### Three-way comparison
+
+```cpp
+friend constexpr auto operator<=>(const strong_type&, const strong_type&) = default;
+```
+
+Provides all comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) via C++20 spaceship operator.
+
+---
+
+## Type Safety Guarantees
+
+### Prevents Accidental Mixing
+
+```cpp
+stx::offset_t off{100};
+stx::rva_t rva{200};
+
+// Compilation errors:
+// auto bad1 = off + rva;     // Error: cannot mix different strong types
+// auto bad2 = off - rva;     // Error: cannot mix different strong types  
+// bool bad3 = off == rva;    // Error: cannot compare different strong types
+
+// Correct usage:
+auto good1 = off + 50;        // OK: offset_t + usize
+auto good2 = rva + 0x100;     // OK: rva_t + u32
+```
+
+### Requires Explicit Construction
+
+```cpp
+// Compilation errors:
+// stx::offset_t off = 100;              // Error: implicit conversion
+// stx::rva_t rva = 0x1000;              // Error: implicit conversion
+// void func(stx::va_t va);
+// func(0x140000000);                     // Error: implicit construction
+
+// Correct usage:
+stx::offset_t off{100};                  // OK: explicit construction
+stx::rva_t rva{0x1000};                  // OK: explicit construction
+void func(stx::va_t va);
+func(stx::va_t{0x140000000});            // OK: explicit construction
+```
+
+### No Implicit Conversion to Underlying Type
+
+```cpp
+stx::offset_t off{100};
+
+// Compilation errors:
+// stx::usize bad1 = off;                 // Error: implicit conversion
+// void func(stx::usize size);
+// func(off);                              // Error: implicit conversion
+
+// Correct usage:
+stx::usize good1 = off.get();            // OK: explicit get()
+stx::usize good2 = static_cast<stx::usize>(off);  // OK: explicit cast
+```
+
+---
+
+## Design Rationale
+
+<ResponseField name="Zero Overhead" type="string">
+  Strong types contain only the underlying value with no additional storage or vtable overhead.
+</ResponseField>
+
+<ResponseField name="Compile-Time Safety" type="string">
+  Type distinctions are enforced at compile time, with zero runtime cost for safety checks.
+</ResponseField>
+
+<ResponseField name="C++23 Features" type="string">
+  Uses explicit object parameters (deducing this) for elegant member function implementation.
+</ResponseField>
+
+<ResponseField name="Constexpr Support" type="string">
+  All operations are constexpr-compatible, enabling compile-time computation.
+</ResponseField>
+
+<ResponseField name="Semantic Clarity" type="string">
+  Type names clearly express intent, making code self-documenting and preventing errors.
+</ResponseField>
+
+---
+
+## Best Practices
+
+1. **Use strong types** for semantically distinct values even if they share the same underlying type
+2. **Prefer explicit construction** over implicit conversion to maintain type safety
+3. **Use .get()** or explicit casts only at API boundaries where necessary
+4. **Keep arithmetic operations** with the underlying type, not between different strong types
+5. **Document conversions** between different address types (e.g., RVA to VA, offset to RVA)
+
+---
+
+## Related
+
+- [Fundamental Types](/api/core/types) - Underlying types used by strong types
+- [Concepts](/api/core/concepts) - Type constraints including address_like
