@@ -1,0 +1,113 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "STX",
+  "projectDescription": "Header-only C++23 library providing type-safe abstractions for systems programming, binary analysis, and low-level memory manipulation.",
+  "theme": "aspen",
+  "primaryColor": "#6366f1",
+  "lightColor": "#818cf8",
+  "darkColor": "#4f46e5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart", "installation"]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/type-system",
+              "concepts/strong-types",
+              "concepts/zero-overhead"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "integration/cmake",
+              "integration/xmake",
+              "integration/modules"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/pe-parser",
+              "examples/memory-patching",
+              "examples/binary-analysis"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/core/types",
+              "api/core/strong-types",
+              "api/core/concepts"
+            ]
+          },
+          {
+            "group": "Memory",
+            "pages": [
+              "api/memory/read-write",
+              "api/memory/alignment",
+              "api/memory/dump"
+            ]
+          },
+          {
+            "group": "File System",
+            "pages": [
+              "api/filesystem/operations",
+              "api/filesystem/positioning"
+            ]
+          },
+          {
+            "group": "Functions",
+            "pages": ["api/functions/caller"]
+          },
+          {
+            "group": "Ranges",
+            "pages": ["api/ranges/iteration"]
+          },
+          {
+            "group": "Time",
+            "pages": [
+              "api/time/unix-time",
+              "api/time/stopwatch"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Header-only C++23 library with zero dependencies",
+    "Type-safe memory operations with alignment support",
+    "Strong types for offsets, addresses, and function signatures",
+    "Binary-safe file I/O utilities",
+    "Colored hexadecimal memory dumps",
+    "UNIX time conversions and high-resolution timing",
+    "C++ Modules support (optional)",
+    "Constexpr-friendly zero-overhead abstractions"
+  ],
+  "publicApiSurface": [
+    "stx::read<T>() / stx::read_raw<T>()",
+    "stx::write<T>() / stx::write_raw<T>()",
+    "stx::align_up() / stx::align_down()",
+    "stx::dump()",
+    "stx::readfs<T>()",
+    "stx::setposfs()",
+    "stx::caller<Sig>()",
+    "stx::range()",
+    "stx::from_unix_seconds() / stx::to_unix_seconds()",
+    "stx::stop_watch",
+    "stx::offset_t / stx::rva_t / stx::va_t",
+    "stx::address_like / stx::binary_readable"
+  ]
+}
