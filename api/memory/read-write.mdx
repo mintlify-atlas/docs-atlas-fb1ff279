@@ -327,3 +327,118 @@ u64 val2 = read<u64>(relative_addr, offset_t{0x50});
 void* raw_ptr = get_memory_region();
 write<u32>(raw_ptr, offset_t{0}, 0x12345678);
 ```
+
+---
+
+## Casting Utilities
+
+STX provides three inline casting utilities for common type conversions in low-level code.
+
+### rcast()
+
+Wrapper for `reinterpret_cast` with shorter syntax.
+
+```cpp
+template<class Type>
+Type rcast(auto value) noexcept;
+```
+
+<ParamField path="Type" type="template parameter" required>
+  Target type to cast to.
+</ParamField>
+
+<ParamField path="value" type="auto">
+  Value to cast.
+</ParamField>
+
+**Example:**
+
+```cpp
+void* ptr = get_buffer();
+u8* byte_ptr = rcast<u8*>(ptr);
+
+uptr address = rcast<uptr>(ptr);
+```
+
+<Warning>
+Use `rcast` with caution. Improper use of `reinterpret_cast` can lead to undefined behavior. Ensure proper alignment and type compatibility.
+</Warning>
+
+---
+
+### scast()
+
+Wrapper for `static_cast` with shorter syntax and `constexpr` support.
+
+```cpp
+template<class Type>
+constexpr Type scast(auto value) noexcept;
+```
+
+<ParamField path="Type" type="template parameter" required>
+  Target type to cast to.
+</ParamField>
+
+<ParamField path="value" type="auto">
+  Value to cast.
+</ParamField>
+
+**Example:**
+
+```cpp
+u64 large = 0x123456789;
+u32 small = scast<u32>(large);  // Narrowing conversion
+
+double d = 3.14;
+int i = scast<int>(d);  // Floating to integer
+```
+
+---
+
+### bcast()
+
+Wrapper for `std::bit_cast` with shorter syntax and `constexpr` support.
+
+```cpp
+template<typename To, typename From>
+[[nodiscard]] constexpr To bcast(const From& from) noexcept;
+```
+
+<ParamField path="To" type="template parameter" required>
+  Target type. Must be same size as `From` and both must be trivially copyable.
+</ParamField>
+
+<ParamField path="From" type="template parameter" required>
+  Source type.
+</ParamField>
+
+<ParamField path="from" type="const From&">
+  Value to bit-cast.
+</ParamField>
+
+**Example:**
+
+```cpp
+// Reinterpret float bits as integer
+f32 pi = 3.14159f;
+u32 bits = bcast<u32>(pi);
+
+// Type-punning between compatible types
+struct Vec2 { f32 x, y; };
+struct Point { f32 coords[2]; };
+
+Vec2 vec{1.0f, 2.0f};
+Point pt = bcast<Point>(vec);
+```
+
+<Info>
+`bcast` provides safe type-punning with compile-time size checks, making it the preferred alternative to union-based or pointer-based type reinterpretation.
+</Info>
+
+---
+
+## Design Notes
+
+- All casting utilities are marked `STX_FORCE_INLINE` for zero overhead
+- `scast` and `bcast` are `constexpr`, enabling compile-time conversions
+- These utilities maintain the same semantics as their standard library counterparts while providing shorter syntax for low-level code
